@@ -1,0 +1,73 @@
+{
+  "name": "folderbot",
+  "version": "1.0.9",
+  "description": "Cross-platform Electron media renamer inspired by FileBot workflows",
+  "main": "dist-electron/main/main.js",
+  "scripts": {
+    "dev": "concurrently -k -n renderer,electron-ts,electron-app \"npm:dev:renderer\" \"npm:dev:electron:ts\" \"npm:dev:electron:app\"",
+    "dev:renderer": "vite",
+    "dev:electron:ts": "tsc -p tsconfig.electron.json --watch --preserveWatchOutput",
+    "dev:electron:app": "wait-on tcp:5173 file:dist-electron/main/main.js && cross-env ELECTRON_RENDERER_URL=http://127.0.0.1:5173 nodemon --watch dist-electron --ext js --exec \"electron dist-electron/main/main.js\"",
+    "build": "npm run build:renderer && npm run build:electron",
+    "build:renderer": "vite build",
+    "build:electron": "tsc -p tsconfig.electron.json",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.electron.json --noEmit",
+    "package": "npm run build && electron-builder",
+    "github:repo:init": "node scripts/github-init-repo.mjs",
+    "github:release": "node scripts/github-publish-release.mjs"
+  },
+  "keywords": [
+    "electron",
+    "media",
+    "renamer",
+    "tmdb",
+    "desktop"
+  ],
+  "author": "",
+  "license": "MIT",
+  "build": {
+    "appId": "com.folderbot.app",
+    "productName": "FolderBot",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist-electron/**/*",
+      "dist/renderer/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "category": "public.app-category.utilities"
+    },
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "perMachine": false,
+      "removeDefaultUninstallWelcomePage": true
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Utility"
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^24.5.2",
+    "concurrently": "^9.2.1",
+    "cross-env": "^10.0.0",
+    "electron": "^38.1.0",
+    "electron-builder": "^26.0.12",
+    "nodemon": "^3.1.10",
+    "typescript": "^5.9.2",
+    "vite": "^7.1.5",
+    "wait-on": "^8.0.5"
+  }
+}
