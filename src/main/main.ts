@@ -3,14 +3,23 @@ import path from "node:path";
 import {
   getAutomationStatus,
   initializeAutomationService,
+  repairAutomationHistoryEntries,
   repairSeasonPlacement,
   updateAutomationSettings
 } from "./automation-service";
 import { getAutomationHistory, undoAutomationHistoryEntry } from "./automation-history-store";
 import { getRenameHistory, recordRenameHistoryBatch, undoRenameHistoryEntry } from "./history-store";
+import { searchSeriesMatches } from "./providers";
 import { applyRenames, getProviderStatuses, previewRenames } from "./rename-service";
 import { getSettings, saveSettings } from "./settings-store";
-import type { AppSettings, ApplyRenameRequest, PreviewRequest, RenameOptions } from "../shared/types";
+import type {
+  AppSettings,
+  ApplyRenameRequest,
+  AutomationRepairRequest,
+  PreviewRequest,
+  RenameOptions,
+  SearchSeriesRequest
+} from "../shared/types";
 
 let mainWindow: BrowserWindow | null = null;
 
@@ -171,6 +180,22 @@ ipcMain.handle("automation:get-status", async () => {
 
 ipcMain.handle("automation:repair-show", async (_event, selectedFolderPath: string) => {
   return repairSeasonPlacement(selectedFolderPath);
+});
+
+ipcMain.handle("automation:search-series", async (_event, payload: Pick<SearchSeriesRequest, "sourceId" | "query">) => {
+  const settings = await getSettings();
+  return searchSeriesMatches({
+    sourceId: payload.sourceId,
+    query: payload.query,
+    language: settings.defaultLanguage,
+    tmdbToken: settings.tmdbBearerToken || undefined,
+    tvdbApiKey: settings.tvdbApiKey || undefined,
+    tvdbPin: settings.tvdbPin || undefined
+  });
+});
+
+ipcMain.handle("automation:repair-history", async (_event, payload: AutomationRepairRequest) => {
+  return repairAutomationHistoryEntries(payload);
 });
 
 ipcMain.handle("automation-history:list", async () => {

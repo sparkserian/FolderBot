@@ -3,6 +3,7 @@ import { formatEpisodeCode, parseMediaName, toDisplayTitle } from "../shared/fil
 import type {
   AppSettings,
   AutomationHistoryEntry,
+  AutomationRepairResult,
   AutomationStatus,
   RepairShowResult,
   UndoAutomationHistoryResult,
@@ -11,6 +12,7 @@ import type {
   ParsedMedia,
   PreviewRequest,
   ProviderStatus,
+  ProviderSeriesSearchMatch,
   RenameHistoryEntry,
   RenamePreview,
   RenameResult
@@ -26,6 +28,14 @@ declare global {
       saveSettings: (payload: Partial<AppSettings>) => Promise<AppSettings>;
       getAutomationStatus: () => Promise<AutomationStatus>;
       repairSeasonPlacement: (selectedFolderPath: string) => Promise<RepairShowResult>;
+      searchAutomationSeries: (payload: {
+        sourceId: MetadataSourceId;
+        query: string;
+      }) => Promise<ProviderSeriesSearchMatch[]>;
+      repairAutomationHistoryEntries: (payload: {
+        entryIds: string[];
+        match: ProviderSeriesSearchMatch;
+      }) => Promise<AutomationRepairResult>;
       getAutomationHistory: () => Promise<AutomationHistoryEntry[]>;
       undoAutomationHistoryEntry: (entryId: string) => Promise<UndoAutomationHistoryResult>;
       getRenameHistory: () => Promise<RenameHistoryEntry[]>;
@@ -57,8 +67,14 @@ interface AppState {
   historyEntries: RenameHistoryEntry[];
   automationHistoryEntries: AutomationHistoryEntry[];
   historySelection: Record<string, string[]>;
+  automationHistorySelection: string[];
   historyTab: "manual" | "automation";
-  modal: "none" | "settings" | "history" | "help";
+  modal: "none" | "settings" | "history" | "help" | "repair";
+  repairSearchQuery: string;
+  repairSearchSourceId: MetadataSourceId;
+  repairSearchResults: ProviderSeriesSearchMatch[];
+  repairSelectedMatchId: string | null;
+  repairHoveredMatchId: string | null;
   busy: boolean;
   message: string;
 }
@@ -104,8 +120,14 @@ const state: AppState = {
   historyEntries: [],
   automationHistoryEntries: [],
   historySelection: {},
+  automationHistorySelection: [],
   historyTab: "manual",
   modal: "none",
+  repairSearchQuery: "",
+  repairSearchSourceId: "tvdb",
+  repairSearchResults: [],
+  repairSelectedMatchId: null,
+  repairHoveredMatchId: null,
   busy: false,
   message: "Add files on the left, choose a source in the center, then match."
 };
@@ -314,11 +336,57 @@ app.innerHTML = `
               <button id="historyTabAutomation" class="quiet-button" type="button">Automation</button>
             </div>
           </div>
-          <button id="historyBackButton" class="quiet-button" type="button">Close</button>
+          <div class="history-actions">
+            <button id="historyRepairButton" class="quiet-button" type="button">Repair selected</button>
+            <button id="historyBackButton" class="quiet-button" type="button">Close</button>
+          </div>
         </div>
 
         <div id="historyList" class="history-list empty-state">
           No rename batches recorded yet.
+        </div>
+      </section>
+    </section>
+
+    <section id="repairView" class="overlay view-hidden">
+      <section class="repair-page modal-panel" role="dialog" aria-modal="true" aria-labelledby="repairTitle">
+        <div class="settings-header">
+          <div class="history-header-copy">
+            <span id="repairTitle" class="pane-title">Repair Automation Match</span>
+            <span id="repairSelectionSummary" class="row-meta"></span>
+          </div>
+          <button id="repairBackButton" class="quiet-button" type="button">Close</button>
+        </div>
+
+        <div class="repair-layout">
+          <section class="repair-search-panel">
+            <label class="control">
+              <span>Provider</span>
+              <select id="repairProviderSelect">
+                <option value="tvdb">TheTVDB</option>
+                <option value="tmdb">TMDb</option>
+              </select>
+            </label>
+            <label class="control">
+              <span>Series name</span>
+              <div class="inline-control">
+                <input id="repairSearchInput" type="text" placeholder="Type the correct show title" />
+                <button id="repairSearchButton" class="quiet-button" type="button">Search</button>
+              </div>
+            </label>
+            <p class="provider-note">Choose the provider to search against for this repair.</p>
+            <div id="repairSearchList" class="repair-search-list empty-state">
+              Search results will appear here.
+            </div>
+          </section>
+
+          <section class="repair-detail-panel">
+            <span class="pane-title">Selected show</span>
+            <div id="repairDetailCard" class="repair-detail-card empty-state">
+              Hover a result to inspect the title, year, and summary before repairing.
+            </div>
+            <button id="repairApplyButton" class="action-primary" type="button">Repair selected items</button>
+          </section>
         </div>
       </section>
     </section>
@@ -347,12 +415,22 @@ app.innerHTML = `
 const workspaceView = requireElement<HTMLElement>("#workspaceView");
 const settingsView = requireElement<HTMLElement>("#settingsView");
 const historyView = requireElement<HTMLElement>("#historyView");
+const repairView = requireElement<HTMLElement>("#repairView");
 const helpView = requireElement<HTMLElement>("#helpView");
 const historyButton = requireElement<HTMLButtonElement>("#historyButton");
+const historyRepairButton = requireElement<HTMLButtonElement>("#historyRepairButton");
 const historyBackButton = requireElement<HTMLButtonElement>("#historyBackButton");
 const historyTabManual = requireElement<HTMLButtonElement>("#historyTabManual");
 const historyTabAutomation = requireElement<HTMLButtonElement>("#historyTabAutomation");
 const historyList = requireElement<HTMLDivElement>("#historyList");
+const repairBackButton = requireElement<HTMLButtonElement>("#repairBackButton");
+const repairProviderSelect = requireElement<HTMLSelectElement>("#repairProviderSelect");
+const repairSearchInput = requireElement<HTMLInputElement>("#repairSearchInput");
+const repairSearchButton = requireElement<HTMLButtonElement>("#repairSearchButton");
+const repairSearchList = requireElement<HTMLDivElement>("#repairSearchList");
+const repairDetailCard = requireElement<HTMLDivElement>("#repairDetailCard");
+const repairApplyButton = requireElement<HTMLButtonElement>("#repairApplyButton");
+const repairSelectionSummary = requireElement<HTMLSpanElement>("#repairSelectionSummary");
 const settingsButton = requireElement<HTMLButtonElement>("#settingsButton");
 const settingsBackButton = requireElement<HTMLButtonElement>("#settingsBackButton");
 const settingsSaveButton = requireElement<HTMLButtonElement>("#settingsSaveButton");
@@ -433,9 +511,17 @@ function bindEvents(): void {
     render();
   });
 
+  historyRepairButton.addEventListener("click", () => {
+    openAutomationRepairModal();
+  });
+
   historyBackButton.addEventListener("click", () => {
     state.modal = "none";
     render();
+  });
+
+  repairBackButton.addEventListener("click", () => {
+    closeRepairModal();
   });
 
   settingsButton.addEventListener("click", () => {
@@ -572,6 +658,67 @@ function bindEvents(): void {
     await runRepairSeasonPlacement();
   });
 
+  repairProviderSelect.addEventListener("change", () => {
+    state.repairSearchSourceId = repairProviderSelect.value as MetadataSourceId;
+    state.repairSearchResults = [];
+    state.repairSelectedMatchId = null;
+    state.repairHoveredMatchId = null;
+    renderRepairModal();
+  });
+
+  repairSearchInput.addEventListener("input", () => {
+    state.repairSearchQuery = repairSearchInput.value;
+  });
+
+  repairSearchInput.addEventListener("keydown", async (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      await runAutomationRepairSearch();
+    }
+  });
+
+  repairSearchButton.addEventListener("click", async () => {
+    await runAutomationRepairSearch();
+  });
+
+  repairSearchList.addEventListener("click", (event) => {
+    const target = event.target;
+    if (!(target instanceof Element)) {
+      return;
+    }
+
+    const button = target.closest<HTMLButtonElement>("[data-repair-match-key]");
+    const matchKey = button?.dataset.repairMatchKey;
+    if (!matchKey) {
+      return;
+    }
+
+    state.repairSelectedMatchId = matchKey;
+    state.repairHoveredMatchId = matchKey;
+    renderRepairSearchList();
+    renderRepairDetailCard();
+  });
+
+  repairSearchList.addEventListener("mouseover", (event) => {
+    const target = event.target;
+    if (!(target instanceof Element)) {
+      return;
+    }
+
+    const button = target.closest<HTMLElement>("[data-repair-match-key]");
+    const matchKey = button?.dataset.repairMatchKey;
+    if (!matchKey) {
+      return;
+    }
+
+    state.repairHoveredMatchId = matchKey;
+    renderRepairDetailCard();
+  });
+
+  repairApplyButton.addEventListener("click", async () => {
+    await applyAutomationRepair();
+  });
+
   outputButton.addEventListener("click", async () => {
     const outputDirectory = await window.folderBot.pickOutputDirectory();
     if (outputDirectory) {
@@ -694,6 +841,20 @@ function bindEvents(): void {
       return;
     }
 
+    const automationEntryId = target.dataset.automationEntryId;
+    if (automationEntryId) {
+      const selected = new Set(state.automationHistorySelection);
+      if (target.checked) {
+        selected.add(automationEntryId);
+      } else {
+        selected.delete(automationEntryId);
+      }
+
+      state.automationHistorySelection = Array.from(selected);
+      render();
+      return;
+    }
+
     const entryId = target.dataset.entryId;
     const itemId = target.dataset.itemId;
 
@@ -726,6 +887,12 @@ function bindEvents(): void {
     }
   });
 
+  repairView.addEventListener("click", (event) => {
+    if (event.target === repairView) {
+      closeRepairModal();
+    }
+  });
+
   helpView.addEventListener("click", (event) => {
     if (event.target === helpView) {
       state.modal = "none";
@@ -735,7 +902,7 @@ function bindEvents(): void {
 
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && state.modal !== "none") {
-      state.modal = "none";
+      state.modal = state.modal === "repair" ? "history" : "none";
       render();
     }
   });
@@ -826,6 +993,7 @@ function render(): void {
   workspaceView.classList.remove("view-hidden");
   settingsView.classList.toggle("view-hidden", state.modal !== "settings");
   historyView.classList.toggle("view-hidden", state.modal !== "history");
+  repairView.classList.toggle("view-hidden", state.modal !== "repair");
   helpView.classList.toggle("view-hidden", state.modal !== "help");
   sourceSelect.value = state.sourceId;
   manualTitleInput.value = state.manualTitle;
@@ -841,6 +1009,8 @@ function render(): void {
   settingsAutomationSource.value = state.settingsDraft.automationSourceId;
   settingsAutomationSettleSeconds.value = String(state.settingsDraft.automationSettleSeconds);
   repairShowFolderInput.value = state.repairShowFolderPath;
+  repairProviderSelect.value = state.repairSearchSourceId === "tmdb" ? "tmdb" : "tvdb";
+  repairSearchInput.value = state.repairSearchQuery;
   message.textContent = state.message;
   fileCount.textContent = `${state.filePaths.length} queued`;
   resultCount.textContent =
@@ -858,6 +1028,7 @@ function render(): void {
   renderResultList();
   renderInspector();
   renderHistoryList();
+  renderRepairModal();
   renderAutomationStatus();
 
   matchButton.disabled =
@@ -870,8 +1041,12 @@ function render(): void {
   dropzone.disabled = state.busy;
   clearButton.disabled = state.busy;
   historyButton.disabled = state.busy && state.modal === "history";
+  historyRepairButton.disabled =
+    state.busy || state.historyTab !== "automation" || state.automationHistorySelection.length === 0;
   settingsButton.disabled = state.busy && state.modal === "settings";
   historyBackButton.disabled = state.busy;
+  repairBackButton.disabled = state.busy;
+  repairProviderSelect.disabled = state.busy;
   settingsBackButton.disabled = state.busy;
   settingsSaveButton.disabled = state.busy;
   settingsAutomationInboxButton.disabled = state.busy;
@@ -879,6 +1054,8 @@ function render(): void {
   settingsAutomationMirrorLibraryButton.disabled = state.busy;
   repairShowFolderButton.disabled = state.busy;
   repairShowRunButton.disabled = state.busy || !state.repairShowFolderPath;
+  repairSearchButton.disabled = state.busy || state.repairSearchQuery.trim().length === 0;
+  repairApplyButton.disabled = state.busy || !getActiveRepairMatch() || state.automationHistorySelection.length === 0;
   helpBackButton.disabled = state.busy;
 }
 
@@ -1047,6 +1224,7 @@ function renderAutomationHistoryList(): void {
   historyList.innerHTML = state.automationHistoryEntries
     .map((entry) => {
       const createdAt = new Date(entry.createdAt).toLocaleString();
+      const isSelected = state.automationHistorySelection.includes(entry.id);
 
       return `
         <article class="history-entry">
@@ -1056,6 +1234,15 @@ function renderAutomationHistoryList(): void {
               <span class="row-meta">${escapeHtml(createdAt)}</span>
             </div>
             <div class="history-actions">
+              <label class="history-toggle">
+                <input
+                  type="checkbox"
+                  data-automation-entry-id="${escapeHtml(entry.id)}"
+                  ${isSelected ? "checked" : ""}
+                  ${entry.undoneAt ? "disabled" : ""}
+                />
+                <span>Select</span>
+              </label>
               <button
                 class="quiet-button"
                 type="button"
@@ -1090,6 +1277,69 @@ function renderAutomationHistoryList(): void {
       `;
     })
     .join("");
+}
+
+function renderRepairModal(): void {
+  renderRepairSearchList();
+  renderRepairDetailCard();
+}
+
+function renderRepairSearchList(): void {
+  const selectionCount = state.automationHistorySelection.length;
+  repairSelectionSummary.textContent =
+    selectionCount > 0
+      ? `${selectionCount} automation item${selectionCount === 1 ? "" : "s"} selected`
+      : "No automation items selected";
+
+  if (state.repairSearchResults.length === 0) {
+    repairSearchList.className = "repair-search-list empty-state";
+    repairSearchList.textContent =
+      state.repairSearchQuery.trim().length > 0
+        ? "No matching shows found."
+        : "Search results will appear here.";
+  } else {
+    repairSearchList.className = "repair-search-list";
+    repairSearchList.innerHTML = state.repairSearchResults
+      .map((match, index) => {
+        const matchKey = buildRepairMatchKey(match, index);
+        const isSelected = matchKey === state.repairSelectedMatchId;
+        return `
+          <button
+            class="repair-search-item${isSelected ? " is-selected" : ""}"
+            type="button"
+            data-repair-match-key="${escapeHtml(matchKey)}"
+          >
+            <strong>${escapeHtml(match.title)}</strong>
+            <span>${escapeHtml(match.year ? String(match.year) : "Year unknown")}</span>
+          </button>
+        `;
+      })
+      .join("");
+  }
+}
+
+function renderRepairDetailCard(): void {
+  const activeMatch = getActiveRepairMatch();
+  if (!activeMatch) {
+    repairDetailCard.className = "repair-detail-card empty-state";
+    repairDetailCard.textContent =
+      "Hover a result to inspect the title, year, and summary before repairing.";
+    return;
+  }
+
+  repairDetailCard.className = "repair-detail-card";
+  repairDetailCard.innerHTML = `
+    <div class="detail-block">
+      <span class="detail-label">Title</span>
+      <strong>${escapeHtml(activeMatch.title)}</strong>
+      <p>${escapeHtml(activeMatch.sourceId.toUpperCase())}</p>
+    </div>
+    <div class="detail-block">
+      <span class="detail-label">Year</span>
+      <strong>${escapeHtml(activeMatch.year ? String(activeMatch.year) : "Unknown")}</strong>
+      <p>${escapeHtml(activeMatch.summary || "No provider summary available for this show.")}</p>
+    </div>
+  `;
 }
 
 function renderInspector(): void {
@@ -1234,6 +1484,135 @@ async function loadHistory(): Promise<void> {
       )
     ])
   );
+  state.automationHistorySelection = state.automationHistorySelection.filter((entryId) =>
+    state.automationHistoryEntries.some((entry) => entry.id === entryId && !entry.undoneAt)
+  );
+}
+
+function openAutomationRepairModal(): void {
+  if (state.historyTab !== "automation" || state.automationHistorySelection.length === 0) {
+    state.message = "Select one or more automation items first.";
+    render();
+    return;
+  }
+
+  const firstSelectedEntry = state.automationHistoryEntries.find((entry) =>
+    state.automationHistorySelection.includes(entry.id)
+  );
+  state.repairSearchSourceId = inferAutomationRepairSourceId();
+  state.repairSearchQuery = firstSelectedEntry?.displayTitle || "";
+  state.repairSearchResults = [];
+  state.repairSelectedMatchId = null;
+  state.repairHoveredMatchId = null;
+  state.modal = "repair";
+  render();
+}
+
+function closeRepairModal(): void {
+  state.modal = "history";
+  render();
+}
+
+function inferAutomationRepairSourceId(): MetadataSourceId {
+  const selectedEntry = state.automationHistoryEntries.find((entry) =>
+    state.automationHistorySelection.includes(entry.id)
+  );
+
+  return selectedEntry?.sourceId === "local" ? state.settings.automationSourceId : selectedEntry?.sourceId ?? "tvdb";
+}
+
+function getActiveRepairMatch(): ProviderSeriesSearchMatch | undefined {
+  const activeId = state.repairSelectedMatchId ?? state.repairHoveredMatchId;
+  if (!activeId) {
+    return undefined;
+  }
+
+  return state.repairSearchResults.find((match, index) => buildRepairMatchKey(match, index) === activeId);
+}
+
+async function runAutomationRepairSearch(): Promise<void> {
+  const query = state.repairSearchQuery.trim();
+  if (!query) {
+    state.message = "Type the correct series name first.";
+    render();
+    return;
+  }
+
+  if (state.repairSearchSourceId === "local") {
+    state.message = "Repair search needs TMDb or TheTVDB, not the local parser.";
+    render();
+    return;
+  }
+
+  state.busy = true;
+  state.message = `Searching ${state.repairSearchSourceId.toUpperCase()}...`;
+  render();
+
+  try {
+    state.repairSearchResults = await window.folderBot.searchAutomationSeries({
+      sourceId: state.repairSearchSourceId,
+      query
+    });
+    state.repairSelectedMatchId = state.repairSearchResults[0]
+      ? buildRepairMatchKey(state.repairSearchResults[0], 0)
+      : null;
+    state.repairHoveredMatchId = state.repairSelectedMatchId;
+    state.message =
+      state.repairSearchResults.length > 0
+        ? `Found ${state.repairSearchResults.length} matching show${state.repairSearchResults.length === 1 ? "" : "s"}.`
+        : "No matching shows found.";
+  } finally {
+    state.busy = false;
+    render();
+  }
+}
+
+function buildRepairMatchKey(match: ProviderSeriesSearchMatch, index: number): string {
+  return `${match.sourceId}:${match.providerSeriesId}:${match.title}:${match.year ?? ""}:${index}`;
+}
+
+async function applyAutomationRepair(): Promise<void> {
+  const match = getActiveRepairMatch();
+  if (!match) {
+    state.message = "Pick a show match first.";
+    render();
+    return;
+  }
+
+  if (state.automationHistorySelection.length === 0) {
+    state.message = "Select one or more automation items first.";
+    render();
+    return;
+  }
+
+  state.busy = true;
+  state.message = `Repairing ${state.automationHistorySelection.length} automation item${
+    state.automationHistorySelection.length === 1 ? "" : "s"
+  }...`;
+  render();
+
+  try {
+    const result = await window.folderBot.repairAutomationHistoryEntries({
+      entryIds: state.automationHistorySelection,
+      match
+    });
+    const failedCount = result.results.filter((entry) => !entry.success).length;
+
+    state.message =
+      failedCount > 0
+        ? `Repair updated ${result.updatedCount} item${result.updatedCount === 1 ? "" : "s"} with ${failedCount} failure${
+            failedCount === 1 ? "" : "s"
+          }.`
+        : `Repair updated ${result.updatedCount} automation item${result.updatedCount === 1 ? "" : "s"}.`;
+
+    await loadHistory();
+    state.modal = "history";
+  } catch (error) {
+    state.message = error instanceof Error ? `Repair failed: ${error.message}` : "Repair failed.";
+  } finally {
+    state.busy = false;
+    render();
+  }
 }
 
 async function undoAutomationHistoryEntry(entryId: string): Promise<void> {

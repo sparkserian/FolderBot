@@ -4,14 +4,25 @@ import { app } from "electron";
 import { parseMediaName, toDisplayTitle } from "../shared/filename-parser";
 import type {
   AppSettings,
+  AutomationRepairEntryResult,
+  AutomationRepairRequest,
+  AutomationRepairResult,
   AutomationEvent,
+  AutomationHistoryEntry,
   RepairShowLocationResult,
   RepairShowResult,
   AutomationStatus,
-  RenamePreview
+  RenameOptions,
+  RenamePreview,
+  ResolvedMetadata
 } from "../shared/types";
-import { recordAutomationHistoryEntry } from "./automation-history-store";
+import {
+  getAutomationHistory,
+  recordAutomationHistoryEntry,
+  saveAutomationHistory
+} from "./automation-history-store";
 import { moveFile, sanitizeWindowsReservedName } from "./file-ops";
+import { resolveEpisodeFromSeriesMatch } from "./providers";
 import { applyRenames, previewRenames } from "./rename-service";
 
 const MEDIA_EXTENSIONS = new Set([".mkv", ".mp4", ".avi", ".mov", ".m4v", ".wmv", ".srt", ".ass", ".mpg", ".mpeg"]);
@@ -107,6 +118,141 @@ export async function repairSeasonPlacement(selectedFolderPath: string): Promise
     selectedShowPath,
     showName,
     locations
+  };
+}
+
+export async function repairAutomationHistoryEntries(
+  request: AutomationRepairRequest
+): Promise<AutomationRepairResult> {
+  if (!settings) {
+    throw new Error("Automation settings are not loaded yet");
+  }
+
+  if (request.match.sourceId === "local") {
+    throw new Error("Local parser repairs are not supported. Use TMDb or TheTVDB.");
+  }
+
+  const history = await getAutomationHistory();
+  const requestedIds = new Set(request.entryIds);
+  const selectedEntries = history.filter((entry) => requestedIds.has(entry.id));
+
+  if (selectedEntries.length === 0) {
+    throw new Error("No automation history items were selected for repair");
+  }
+
+  const results: AutomationRepairEntryResult[] = [];
+  const options = buildRenameOptions(settings, request.match.sourceId);
+  let updatedCount = 0;
+
+  for (const entry of selectedEntries) {
+    if (entry.undoneAt) {
+      results.push({
+        entryId: entry.id,
+        sourcePath: entry.sourceLibraryPath,
+        mirrorPath: entry.mirrorLibraryPath,
+        success: false,
+        error: "This automation item has already been undone"
+      });
+      continue;
+    }
+
+    try {
+      const currentSourcePath = await resolveExistingAutomationPath(entry.sourceLibraryPath, entry.originalInboxPath);
+      const currentMirrorPath = await resolveExistingAutomationPath(entry.mirrorLibraryPath);
+      const basisPath = currentSourcePath ?? currentMirrorPath;
+
+      if (!basisPath) {
+        throw new Error("Could not find the current source or mirror file for this automation item");
+      }
+
+      const currentName = path.basename(basisPath);
+      const parsed = parseMediaName(currentName);
+      if (parsed.kind !== "episode") {
+        throw new Error("Only TV episode repairs are supported");
+      }
+
+      const providerResult = await resolveEpisodeFromSeriesMatch(parsed, request.match, options);
+      const metadata = providerResult.metadata;
+
+      if (!metadata) {
+        throw new Error(providerResult.warnings[0] || "Provider could not resolve a repair target");
+      }
+
+      const targetFileName = buildEpisodeTargetName(currentName, parsed, metadata);
+      const sourceResolution = await resolveLibraryTargetPathForPlacement(
+        { metadata, parsed },
+        settings.automationSourceLibraryDirectory,
+        targetFileName
+      );
+      const mirrorResolution = await resolveLibraryTargetPathForPlacement(
+        { metadata, parsed },
+        settings.automationMirrorLibraryDirectory,
+        targetFileName
+      );
+
+      logFolderCreationEvents("source", sourceResolution);
+      logFolderCreationEvents("mirror", mirrorResolution);
+
+      addEvent(`Repairing automation item to ${metadata.displayTitle}: ${currentName}`);
+
+      if (currentSourcePath) {
+        await moveFile(currentSourcePath, sourceResolution.targetPath);
+      }
+
+      if (currentMirrorPath) {
+        await moveFile(currentMirrorPath, mirrorResolution.targetPath);
+      } else if (!(await pathExists(mirrorResolution.targetPath))) {
+        await fs.copyFile(sourceResolution.targetPath, mirrorResolution.targetPath);
+      }
+
+      if (!currentSourcePath) {
+        if (!(await pathExists(mirrorResolution.targetPath))) {
+          throw new Error("Could not rebuild the source library file because the mirror copy is missing");
+        }
+
+        await fs.copyFile(mirrorResolution.targetPath, sourceResolution.targetPath);
+      }
+
+      if (currentSourcePath) {
+        await cleanupEmptyAncestors(path.dirname(currentSourcePath), settings.automationSourceLibraryDirectory);
+      }
+      if (currentMirrorPath) {
+        await cleanupEmptyAncestors(path.dirname(currentMirrorPath), settings.automationMirrorLibraryDirectory);
+      }
+
+      entry.sourceLibraryPath = sourceResolution.targetPath;
+      entry.mirrorLibraryPath = mirrorResolution.targetPath;
+      entry.displayTitle = metadata.displayTitle;
+      updatedCount += 1;
+
+      results.push({
+        entryId: entry.id,
+        sourcePath: currentSourcePath ?? entry.sourceLibraryPath,
+        targetSourcePath: sourceResolution.targetPath,
+        mirrorPath: currentMirrorPath ?? entry.mirrorLibraryPath,
+        targetMirrorPath: mirrorResolution.targetPath,
+        success: true
+      });
+    } catch (error) {
+      const errorMessage = formatError(error);
+      addEvent(`Automation repair failed for ${path.basename(entry.sourceLibraryPath)}: ${errorMessage}`);
+      results.push({
+        entryId: entry.id,
+        sourcePath: entry.sourceLibraryPath,
+        mirrorPath: entry.mirrorLibraryPath,
+        success: false,
+        error: errorMessage
+      });
+    }
+  }
+
+  if (updatedCount > 0) {
+    await saveAutomationHistory(history);
+  }
+
+  return {
+    updatedCount,
+    results
   };
 }
 
@@ -368,7 +514,15 @@ async function moveToLibraryRoot(
 }
 
 async function resolveLibraryTargetPath(
-  preview: RenamePreview,
+  preview: Pick<RenamePreview, "metadata" | "parsed">,
+  libraryRoot: string,
+  fileName: string
+): Promise<ResolvedLibraryTarget> {
+  return resolveLibraryTargetPathForPlacement(preview, libraryRoot, fileName);
+}
+
+async function resolveLibraryTargetPathForPlacement(
+  preview: Pick<RenamePreview, "metadata" | "parsed">,
   libraryRoot: string,
   fileName: string
 ): Promise<ResolvedLibraryTarget> {
@@ -429,7 +583,7 @@ async function findOrCreateShowDirectory(
 
 async function findSeasonDirectory(
   showDirectory: string,
-  preview: RenamePreview
+  preview: Pick<RenamePreview, "metadata" | "parsed">
 ): Promise<{ path: string; created: boolean } | null> {
   const seasonNumber = preview.metadata?.season ?? preview.parsed.season;
   if (typeof seasonNumber !== "number") {
@@ -563,6 +717,66 @@ async function pathExists(filePath: string): Promise<boolean> {
     }
 
     throw error;
+  }
+}
+
+function buildRenameOptions(currentSettings: AppSettings, sourceId: RenameOptions["sourceId"]): RenameOptions {
+  return {
+    sourceId,
+    tmdbToken: currentSettings.tmdbBearerToken || undefined,
+    tvdbApiKey: currentSettings.tvdbApiKey || undefined,
+    tvdbPin: currentSettings.tvdbPin || undefined,
+    language: currentSettings.defaultLanguage
+  };
+}
+
+function buildEpisodeTargetName(
+  currentName: string,
+  parsed: ReturnType<typeof parseMediaName>,
+  metadata: ResolvedMetadata
+): string {
+  const extension = path.extname(currentName);
+  const displayTitle = sanitizeDirectoryName(metadata.displayTitle || toDisplayTitle(parsed.normalizedTitle) || "Untitled");
+  const season = metadata.season ?? parsed.season;
+  const episode = metadata.episode ?? parsed.episode;
+  const episodeCode =
+    typeof season === "number" && typeof episode === "number"
+      ? `S${String(season).padStart(2, "0")}E${String(episode).padStart(2, "0")}`
+      : typeof parsed.absoluteEpisode === "number"
+        ? `E${String(parsed.absoluteEpisode).padStart(3, "0")}`
+        : "Episode";
+  const episodeTitle = sanitizeDirectoryName(metadata.episodeTitle || "");
+  const suffix = episodeTitle ? ` - ${episodeTitle}` : "";
+  return `${displayTitle} - ${episodeCode}${suffix}${extension}`;
+}
+
+async function resolveExistingAutomationPath(...candidatePaths: string[]): Promise<string | null> {
+  for (const candidatePath of candidatePaths) {
+    if (candidatePath && (await pathExists(candidatePath))) {
+      return candidatePath;
+    }
+  }
+
+  return null;
+}
+
+async function cleanupEmptyAncestors(startDirectory: string, libraryRoot: string): Promise<void> {
+  let currentDirectory = path.resolve(startDirectory);
+  const normalizedRoot = path.resolve(libraryRoot);
+
+  while (isPathWithinRoot(currentDirectory, normalizedRoot) && currentDirectory !== normalizedRoot) {
+    try {
+      await fs.rmdir(currentDirectory);
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code === "ENOTEMPTY" || code === "ENOENT") {
+        break;
+      }
+
+      throw error;
+    }
+
+    currentDirectory = path.dirname(currentDirectory);
   }
 }
 

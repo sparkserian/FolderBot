@@ -367,7 +367,8 @@ select {
 }
 
 .history-page,
-.help-page {
+.help-page,
+.repair-page {
   display: grid;
   grid-template-rows: auto 1fr;
 }
@@ -467,6 +468,18 @@ select {
   gap: 6px;
 }
 
+.history-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+}
+
+.history-toggle input {
+  width: 14px;
+  height: 14px;
+}
+
 .history-summary {
   margin: 8px 0;
   color: var(--muted);
@@ -560,6 +573,63 @@ select {
   overflow: auto;
 }
 
+.repair-layout {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(280px, 0.9fr);
+}
+
+.repair-search-panel,
+.repair-detail-panel {
+  min-height: 0;
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  padding: 12px;
+}
+
+.repair-search-panel {
+  border-right: 1px solid var(--line);
+}
+
+.repair-search-list {
+  min-height: 240px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  background: #202020;
+}
+
+.repair-search-item {
+  width: 100%;
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border: 0;
+  border-top: 1px solid #343434;
+  background: transparent;
+  text-align: left;
+}
+
+.repair-search-item:first-child {
+  border-top: 0;
+}
+
+.repair-search-item span {
+  color: var(--muted);
+}
+
+.repair-search-item.is-selected,
+.repair-search-item:hover {
+  background: #353535;
+}
+
+.repair-detail-card {
+  min-height: 200px;
+  border: 1px solid var(--line);
+  background: #202020;
+  padding: 12px;
+}
+
 .automation-repair-panel {
   display: grid;
   gap: 8px;
@@ -629,7 +699,13 @@ button:disabled {
 
   .automation-status-grid,
   .settings-inline-grid,
-  .automation-event-list li {
+  .automation-event-list li,
+  .repair-layout {
     grid-template-columns: 1fr;
+  }
+
+  .repair-search-panel {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
   }
 }

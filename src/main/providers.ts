@@ -1,9 +1,11 @@
 import type {
   MetadataSourceId,
   ParsedMedia,
+  ProviderSeriesSearchMatch,
   ProviderStatus,
   RenameOptions,
-  ResolvedMetadata
+  ResolvedMetadata,
+  SearchSeriesRequest
 } from "../shared/types";
 import { toDisplayTitle } from "../shared/filename-parser";
 
@@ -19,8 +21,52 @@ interface MetadataProvider {
   resolve(parsed: ParsedMedia, options: RenameOptions): Promise<ResolveResult>;
 }
 
+interface SearchableMetadataProvider extends MetadataProvider {
+  searchSeries?(request: SearchSeriesRequest): Promise<ProviderSeriesSearchMatch[]>;
+  resolveEpisodeFromSeriesMatch?(
+    parsed: ParsedMedia,
+    match: ProviderSeriesSearchMatch,
+    options: RenameOptions
+  ): Promise<ResolveResult>;
+}
+
+let providerInstances: SearchableMetadataProvider[] | null = null;
+
 export function createProviders(): MetadataProvider[] {
-  return [new LocalMetadataProvider(), new TMDbMetadataProvider(), new TVDbMetadataProvider()];
+  return getProviderInstances();
+}
+
+export async function searchSeriesMatches(request: SearchSeriesRequest): Promise<ProviderSeriesSearchMatch[]> {
+  const provider = getProviderInstances().find((entry) => entry.id === request.sourceId);
+  if (!provider?.searchSeries) {
+    return [];
+  }
+
+  return provider.searchSeries(request);
+}
+
+export async function resolveEpisodeFromSeriesMatch(
+  parsed: ParsedMedia,
+  match: ProviderSeriesSearchMatch,
+  options: RenameOptions
+): Promise<ResolveResult> {
+  const provider = getProviderInstances().find((entry) => entry.id === match.sourceId);
+  if (!provider?.resolveEpisodeFromSeriesMatch) {
+    return {
+      metadata: null,
+      warnings: ["This provider does not support exact series repair."]
+    };
+  }
+
+  return provider.resolveEpisodeFromSeriesMatch(parsed, match, options);
+}
+
+function getProviderInstances(): SearchableMetadataProvider[] {
+  if (!providerInstances) {
+    providerInstances = [new LocalMetadataProvider(), new TMDbMetadataProvider(), new TVDbMetadataProvider()];
+  }
+
+  return providerInstances;
 }
 
 const TVDB_BASE_URL = "https://api4.thetvdb.com/v4";
@@ -53,7 +99,7 @@ class LocalMetadataProvider implements MetadataProvider {
   }
 }
 
-class TMDbMetadataProvider implements MetadataProvider {
+class TMDbMetadataProvider implements SearchableMetadataProvider {
   public readonly id = "tmdb" as const;
   public readonly label = "TMDb";
   private readonly movieSearchCache = new Map<string, Promise<SearchResponse>>();
@@ -98,6 +144,84 @@ class TMDbMetadataProvider implements MetadataProvider {
     return {
       metadata: null,
       warnings: ["TMDb could not resolve this filename shape."]
+    };
+  }
+
+  public async searchSeries(request: SearchSeriesRequest): Promise<ProviderSeriesSearchMatch[]> {
+    if (!request.tmdbToken) {
+      return [];
+    }
+
+    const params = new URLSearchParams({
+      query: request.query,
+      language: request.language || "en-US"
+    });
+
+    const response = await this.cachedRequest(
+      this.tvSearchCache,
+      `search:${params.toString()}`,
+      `/search/tv?${params.toString()}`,
+      request.tmdbToken
+    );
+
+    return response.results.slice(0, 8).map((result) => ({
+      sourceId: this.id,
+      providerSeriesId: String(result.id),
+      title: result.name || result.title,
+      year: parseOptionalYear(result.first_air_date),
+      summary: result.overview
+    }));
+  }
+
+  public async resolveEpisodeFromSeriesMatch(
+    parsed: ParsedMedia,
+    match: ProviderSeriesSearchMatch,
+    options: RenameOptions
+  ): Promise<ResolveResult> {
+    if (!options.tmdbToken) {
+      return {
+        metadata: null,
+        warnings: ["TMDb is selected, but no bearer token is configured."]
+      };
+    }
+
+    if (parsed.kind !== "episode") {
+      return {
+        metadata: null,
+        warnings: ["Only TV episode repairs are supported."]
+      };
+    }
+
+    let episodeTitle: string | undefined;
+    let summary = match.summary;
+
+    if (typeof parsed.season === "number" && typeof parsed.episode === "number") {
+      const episodePath = `/tv/${encodeURIComponent(match.providerSeriesId)}/season/${parsed.season}/episode/${
+        parsed.episode
+      }?language=${encodeURIComponent(options.language || "en-US")}`;
+      const episode = await this.cachedRequest(
+        this.episodeCache,
+        `repair:${episodePath}`,
+        episodePath,
+        options.tmdbToken
+      );
+
+      episodeTitle = episode.name;
+      summary = episode.overview || summary;
+    }
+
+    return {
+      metadata: {
+        sourceId: this.id,
+        displayTitle: match.title,
+        season: parsed.season,
+        episode: parsed.episode,
+        episodeTitle,
+        year: match.year,
+        summary,
+        matchConfidence: 1
+      },
+      warnings: []
     };
   }
 
@@ -215,7 +339,7 @@ class TMDbMetadataProvider implements MetadataProvider {
   }
 }
 
-class TVDbMetadataProvider implements MetadataProvider {
+class TVDbMetadataProvider implements SearchableMetadataProvider {
   public readonly id = "tvdb" as const;
   public readonly label = "TheTVDB";
   private readonly searchCache = new Map<string, Promise<TVDbSearchResult[]>>();
@@ -262,6 +386,102 @@ class TVDbMetadataProvider implements MetadataProvider {
     return {
       metadata: null,
       warnings: ["TVDB could not resolve this filename shape."]
+    };
+  }
+
+  public async searchSeries(request: SearchSeriesRequest): Promise<ProviderSeriesSearchMatch[]> {
+    if (!request.tvdbApiKey) {
+      return [];
+    }
+
+    const searchPath = `/search?${buildTVDbSearchParams({
+      query: request.query,
+      type: "series",
+      language: toTVDbLanguage(request.language)
+    })}`;
+    const search = await this.cachedTVDbRequest(
+      this.searchCache,
+      `search:${searchPath}`,
+      searchPath,
+      request
+    );
+
+    return search.slice(0, 8).flatMap((result) => {
+      const providerSeriesId = getTVDbResultId(result);
+      const title = result.name?.trim();
+      if (!providerSeriesId || !title) {
+        return [];
+      }
+
+      return {
+        sourceId: this.id,
+        providerSeriesId: String(providerSeriesId),
+        title,
+        year: parseOptionalYear(result.year),
+        summary: result.overview
+      };
+    });
+  }
+
+  public async resolveEpisodeFromSeriesMatch(
+    parsed: ParsedMedia,
+    match: ProviderSeriesSearchMatch,
+    options: RenameOptions
+  ): Promise<ResolveResult> {
+    if (!options.tvdbApiKey) {
+      return {
+        metadata: null,
+        warnings: ["TVDB is selected, but no API key is configured."]
+      };
+    }
+
+    if (parsed.kind !== "episode") {
+      return {
+        metadata: null,
+        warnings: ["Only TV episode repairs are supported."]
+      };
+    }
+
+    let episodeTitle: string | undefined;
+    let summary = match.summary;
+    let season = parsed.season;
+    let episode = parsed.episode;
+    const warnings: string[] = [];
+
+    if (typeof parsed.season === "number" && typeof parsed.episode === "number") {
+      const episodesPath = `/series/${encodeURIComponent(match.providerSeriesId)}/episodes/default?page=0&season=${
+        parsed.season
+      }&episodeNumber=${parsed.episode}`;
+      const response = await this.cachedTVDbRequest(
+        this.episodeListCache,
+        `repair:${episodesPath}`,
+        episodesPath,
+        options
+      );
+
+      const matchedEpisode = response.episodes[0];
+      if (matchedEpisode) {
+        episodeTitle = matchedEpisode.name;
+        summary = matchedEpisode.overview || summary;
+        season = matchedEpisode.seasonNumber ?? season;
+        episode = matchedEpisode.number ?? episode;
+      } else {
+        warnings.push("TVDB did not return the exact season and episode for this repair.");
+      }
+    }
+
+    return {
+      metadata: {
+        sourceId: this.id,
+        displayTitle: match.title,
+        season,
+        episode,
+        episodeTitle,
+        year: match.year,
+        summary,
+        matchConfidence: 1
+      },
+      warnings
     };
   }
 

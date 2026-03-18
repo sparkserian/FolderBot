@@ -71,6 +71,14 @@ export interface ProviderStatus {
   details: string;
 }
 
+export interface ProviderSeriesSearchMatch {
+  sourceId: MetadataSourceId;
+  providerSeriesId: string;
+  title: string;
+  year?: number;
+  summary?: string;
+}
+
 export interface AppSettings {
   tmdbBearerToken: string;
   tvdbApiKey: string;
@@ -124,6 +132,35 @@ export interface AutomationActionResult {
 export interface UndoAutomationHistoryResult {
   entryId: string;
   results: AutomationActionResult[];
+}
+
+export interface SearchSeriesRequest {
+  sourceId: MetadataSourceId;
+  query: string;
+  language: string;
+  tmdbToken?: string;
+  tvdbApiKey?: string;
+  tvdbPin?: string;
+}
+
+export interface AutomationRepairRequest {
+  entryIds: string[];
+  match: ProviderSeriesSearchMatch;
+}
+
+export interface AutomationRepairEntryResult {
+  entryId: string;
+  sourcePath: string;
+  targetSourcePath?: string;
+  mirrorPath: string;
+  targetMirrorPath?: string;
+  success: boolean;
+  error?: string;
+}
+
+export interface AutomationRepairResult {
+  updatedCount: number;
+  results: AutomationRepairEntryResult[];
 }
 
 export interface RepairShowLocationResult {

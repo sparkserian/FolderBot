@@ -24,6 +24,10 @@ export async function getAutomationHistory(): Promise<AutomationHistoryEntry[]> 
   }
 }
 
+export async function saveAutomationHistory(history: AutomationHistoryEntry[]): Promise<void> {
+  await writeAutomationHistory(history);
+}
+
 export async function recordAutomationHistoryEntry(input: {
   sourceId: MetadataSourceId;
   originalInboxPath: string;

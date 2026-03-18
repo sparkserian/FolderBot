@@ -1,12 +1,16 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron";
 import type {
   AppSettings,
-  RepairShowResult,
-  AutomationHistoryEntry,
-  AutomationStatus,
   ApplyRenameRequest,
+  AutomationHistoryEntry,
+  AutomationRepairRequest,
+  AutomationRepairResult,
+  AutomationStatus,
+  MetadataSourceId,
   PreviewRequest,
+  ProviderSeriesSearchMatch,
   RenameHistoryEntry,
+  RepairShowResult,
   UndoAutomationHistoryResult,
   UndoRenameHistoryRequest,
   UndoRenameHistoryResult
@@ -24,6 +28,10 @@ contextBridge.exposeInMainWorld("folderBot", {
   getAutomationStatus: () => ipcRenderer.invoke("automation:get-status") as Promise<AutomationStatus>,
   repairSeasonPlacement: (selectedFolderPath: string) =>
     ipcRenderer.invoke("automation:repair-show", selectedFolderPath) as Promise<RepairShowResult>,
+  searchAutomationSeries: (payload: { sourceId: MetadataSourceId; query: string }) =>
+    ipcRenderer.invoke("automation:search-series", payload) as Promise<ProviderSeriesSearchMatch[]>,
+  repairAutomationHistoryEntries: (payload: AutomationRepairRequest) =>
+    ipcRenderer.invoke("automation:repair-history", payload) as Promise<AutomationRepairResult>,
   getAutomationHistory: () => ipcRenderer.invoke("automation-history:list") as Promise<AutomationHistoryEntry[]>,
   undoAutomationHistoryEntry: (entryId: string) =>
     ipcRenderer.invoke("automation-history:undo", entryId) as Promise<UndoAutomationHistoryResult>,
