@@ -1,6 +1,6 @@
 {
   "name": "folderbot",
-  "version": "1.0.9",
+  "version": "1.0.10",
   "description": "Cross-platform Electron media renamer inspired by FileBot workflows",
   "main": "dist-electron/main/main.js",
   "scripts": {
