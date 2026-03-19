@@ -1,7 +1,9 @@
+// Cross-platform file move helpers shared by manual renames, undo, and automation flows.
 import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 
+// Move a file while handling same-path renames and cross-volume fallbacks safely.
 export async function moveFile(sourcePath: string, targetPath: string): Promise<void> {
   if (sourcePath === targetPath) {
     return;
@@ -36,6 +38,7 @@ export async function moveFile(sourcePath: string, targetPath: string): Promise<
   }
 }
 
+// Conflict checks treat case-only renames on the same path as safe.
 export async function targetExistsForRename(sourcePath: string, targetPath: string): Promise<boolean> {
   if (sourcePath === targetPath || isSameFilesystemPath(sourcePath, targetPath)) {
     return false;
@@ -44,6 +47,7 @@ export async function targetExistsForRename(sourcePath: string, targetPath: stri
   return pathExists(targetPath);
 }
 
+// Windows blocks a few reserved basenames, so outputs are normalized here.
 export function sanitizeWindowsReservedName(value: string): string {
   const match = value.match(/^(.*?)(\.[^.]+)?$/);
   const basename = match?.[1] ?? value;
@@ -56,14 +60,17 @@ export function sanitizeWindowsReservedName(value: string): string {
   return value;
 }
 
+// Normalize paths before comparing them so case-insensitive filesystems behave correctly.
 function isSameFilesystemPath(leftPath: string, rightPath: string): boolean {
   return normalizePathForComparison(leftPath) === normalizePathForComparison(rightPath);
 }
 
+// Windows cannot rename directly across drive roots, so those moves use copy/remove.
 function shouldUseCopyFallback(sourcePath: string, targetPath: string): boolean {
   return process.platform === "win32" && getPathRoot(sourcePath) !== getPathRoot(targetPath);
 }
 
+// Some rename failures are safe to retry with a copy/remove fallback.
 function canFallbackToCopy(
   error: NodeJS.ErrnoException,
   sourcePath: string,
@@ -83,15 +90,18 @@ function canFallbackToCopy(
   );
 }
 
+// Lowercasing Windows paths keeps path comparisons predictable.
 function normalizePathForComparison(filePath: string): string {
   const resolvedPath = path.resolve(filePath);
   return process.platform === "win32" ? resolvedPath.toLowerCase() : resolvedPath;
 }
 
+// Drive roots are used to distinguish same-volume and cross-volume operations.
 function getPathRoot(filePath: string): string {
   return normalizePathForComparison(path.parse(filePath).root);
 }
 
+// Small helper shared by the move and conflict-detection code paths.
 async function pathExists(filePath: string): Promise<boolean> {
   try {
     await fs.access(filePath);
@@ -105,6 +115,7 @@ async function pathExists(filePath: string): Promise<boolean> {
   }
 }
 
+// Create the target parent directory when needed, but avoid mkdir calls on drive roots.
 async function ensureParentDirectory(filePath: string): Promise<void> {
   const parentDirectory = path.dirname(filePath);
   const rootDirectory = path.parse(parentDirectory).root;
@@ -116,6 +127,7 @@ async function ensureParentDirectory(filePath: string): Promise<void> {
   await fs.mkdir(parentDirectory, { recursive: true });
 }
 
+// A temp-hop rename safely handles case-only renames on case-insensitive filesystems.
 async function renameWithTempHop(sourcePath: string, targetPath: string): Promise<void> {
   const tempPath = path.join(
     path.dirname(sourcePath),
@@ -132,6 +144,7 @@ async function renameWithTempHop(sourcePath: string, targetPath: string): Promis
   }
 }
 
+// Cross-volume moves fall back to copy + delete with rollback if delete fails.
 async function copyAndRemove(sourcePath: string, targetPath: string): Promise<void> {
   await fs.copyFile(sourcePath, targetPath);
 

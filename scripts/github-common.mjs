@@ -1,3 +1,4 @@
+// Shared helpers used by the local GitHub repo and release scripts.
 import fs from "node:fs/promises";
 import path from "node:path";
 
@@ -18,12 +19,14 @@ export async function readReleaseEnv() {
   return { owner, repo, token };
 }
 
+// Read package.json once so every script uses the same current version number.
 export async function readPackageJson() {
   const packagePath = path.join(ROOT_DIR, "package.json");
   const raw = await fs.readFile(packagePath, "utf8");
   return JSON.parse(raw);
 }
 
+// Small wrapper around the GitHub REST API used by the local release scripts.
 export async function githubRequest(urlPath, { method = "GET", token, body, headers = {} } = {}) {
   const response = await fetch(`https://api.github.com${urlPath}`, {
     method,
@@ -49,6 +52,7 @@ export async function githubRequest(urlPath, { method = "GET", token, body, head
   return response.json();
 }
 
+// Upload one local file as a GitHub release asset.
 export async function githubUpload(uploadUrl, filePath, token) {
   const fileName = path.basename(filePath);
   const fileBuffer = await fs.readFile(filePath);
@@ -74,6 +78,7 @@ export async function githubUpload(uploadUrl, filePath, token) {
   return response.json();
 }
 
+// Run a git command and stream its output through the current terminal.
 export async function runGit(args) {
   const { spawn } = await import("node:child_process");
 
@@ -96,6 +101,7 @@ export async function runGit(args) {
   });
 }
 
+// Run a git command and capture stdout for script decisions.
 export async function gitOutput(args) {
   const { spawn } = await import("node:child_process");
 
@@ -129,12 +135,14 @@ export async function gitOutput(args) {
   });
 }
 
+// Print consistent script usage text.
 export function printScriptUsage(lines) {
   for (const line of lines) {
     console.log(line);
   }
 }
 
+// Parse the simple KEY=value format used by the root .env.local file.
 async function readEnvFile(filePath) {
   try {
     const contents = await fs.readFile(filePath, "utf8");
@@ -157,6 +165,7 @@ async function readEnvFile(filePath) {
   }
 }
 
+// Pick a sensible upload content type for each release artifact extension.
 function inferContentType(filePath) {
   const extension = path.extname(filePath).toLowerCase();
 

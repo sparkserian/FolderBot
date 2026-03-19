@@ -1,3 +1,4 @@
+// Renderer entry point: builds the UI, manages in-memory state, and calls into the preload API.
 import "./styles.css";
 import { formatEpisodeCode, parseMediaName, toDisplayTitle } from "../shared/filename-parser";
 import type {
@@ -52,6 +53,7 @@ declare global {
   }
 }
 
+// Renderer-only state for the current queue, modal visibility, history selection, and settings drafts.
 interface AppState {
   filePaths: string[];
   previews: RenamePreview[];
@@ -79,6 +81,7 @@ interface AppState {
   message: string;
 }
 
+// Defaults keep the UI stable before the async settings load completes.
 const DEFAULT_SETTINGS: AppSettings = {
   tmdbBearerToken: "",
   tvdbApiKey: "",
@@ -476,6 +479,7 @@ bindEvents();
 render();
 void initialize();
 
+// Pull initial settings, history, and automation status from the preload bridge.
 async function initialize(): Promise<void> {
   state.settings = await window.folderBot.getSettings();
   state.settingsDraft = { ...state.settings };
@@ -494,6 +498,7 @@ async function initialize(): Promise<void> {
   render();
 }
 
+// Register all DOM event handlers in one place so state transitions are easier to follow.
 function bindEvents(): void {
   historyButton.addEventListener("click", async () => {
     await loadHistory();
@@ -1473,6 +1478,7 @@ async function getDroppedPaths(event: DragEvent): Promise<string[]> {
   return Array.from(new Set(paths));
 }
 
+// Reload both history views from disk after any rename, undo, or repair action.
 async function loadHistory(): Promise<void> {
   state.historyEntries = await window.folderBot.getRenameHistory();
   state.automationHistoryEntries = await window.folderBot.getAutomationHistory();
@@ -1567,6 +1573,7 @@ async function runAutomationRepairSearch(): Promise<void> {
   }
 }
 
+// Multiple visible results can share the same provider ID, so the UI uses a unique key per row.
 function buildRepairMatchKey(match: ProviderSeriesSearchMatch, index: number): string {
   return `${match.sourceId}:${match.providerSeriesId}:${match.title}:${match.year ?? ""}:${index}`;
 }
@@ -1690,6 +1697,7 @@ async function undoHistoryEntry(entryId: string, itemIds?: string[]): Promise<vo
   }
 }
 
+// Render the live watcher summary and recent automation event feed inside Settings.
 function renderAutomationStatus(): void {
   const status = state.automationStatus;
   const recentEvents = status.recentEvents.length > 0

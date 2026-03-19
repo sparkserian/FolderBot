@@ -1,3 +1,4 @@
+// Persistent settings storage and normalization for provider credentials and automation settings.
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { app } from "electron";
@@ -16,6 +17,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   automationSettleSeconds: 45
 };
 
+// Load the saved settings file and fill in any missing fields with defaults.
 export async function getSettings(): Promise<AppSettings> {
   const settingsPath = getSettingsPath();
 
@@ -55,6 +57,7 @@ export async function getSettings(): Promise<AppSettings> {
   }
 }
 
+// Merge incoming changes with the stored settings, normalize them, and persist the result.
 export async function saveSettings(input: Partial<AppSettings>): Promise<AppSettings> {
   const nextSettings = {
     ...(await getSettings()),
@@ -67,10 +70,12 @@ export async function saveSettings(input: Partial<AppSettings>): Promise<AppSett
   return nextSettings;
 }
 
+// Store settings inside Electron's userData directory so they survive app upgrades.
 function getSettingsPath(): string {
   return path.join(app.getPath("userData"), "settings.json");
 }
 
+// Trim, clamp, and sanitize input values before they are written to disk.
 function normalizeSettings(input: Partial<AppSettings>): Partial<AppSettings> {
   return {
     tmdbBearerToken: input.tmdbBearerToken?.trim(),
@@ -88,12 +93,14 @@ function normalizeSettings(input: Partial<AppSettings>): Partial<AppSettings> {
   };
 }
 
+// Accept only provider IDs the rest of the app knows how to handle.
 function normalizeAutomationSourceId(value: AppSettings["automationSourceId"] | undefined): AppSettings["automationSourceId"] {
   return value === "tmdb" || value === "tvdb" || value === "local"
     ? value
     : DEFAULT_SETTINGS.automationSourceId;
 }
 
+// Keep the settle window inside a reasonable range for the automation watcher.
 function normalizeAutomationSettleSeconds(value: number | undefined): number {
   if (typeof value !== "number" || Number.isNaN(value)) {
     return DEFAULT_SETTINGS.automationSettleSeconds;

@@ -1,3 +1,4 @@
+// Electron main-process bootstrap: window creation, menus, native dialogs, and IPC handlers.
 import { app, BrowserWindow, Menu, dialog, ipcMain } from "electron";
 import path from "node:path";
 import {
@@ -23,6 +24,7 @@ import type {
 
 let mainWindow: BrowserWindow | null = null;
 
+// Create the single application window used for the desktop UI.
 function createMainWindow(): void {
   mainWindow = new BrowserWindow({
     width: 1100,
@@ -50,6 +52,7 @@ function createMainWindow(): void {
   }
 }
 
+// Build the native application menu and wire Help -> How To back into the renderer.
 function createApplicationMenu(): void {
   const template: Electron.MenuItemConstructorOptions[] = [
     {
@@ -99,6 +102,7 @@ function createApplicationMenu(): void {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
+// Start Electron, create the main window, and initialize the automation watcher with saved settings.
 app.whenReady().then(async () => {
   createApplicationMenu();
   createMainWindow();
@@ -114,12 +118,14 @@ app.whenReady().then(async () => {
   });
 });
 
+// Standard Electron shutdown behavior: quit on non-macOS once all windows are closed.
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {
     app.quit();
   }
 });
 
+// Native file picker used by the manual import flow.
 ipcMain.handle("dialog:pick-files", async () => {
   const options = {
     properties: ["openFile", "multiSelections"],
@@ -149,6 +155,7 @@ ipcMain.handle("dialog:pick-files", async () => {
   return result.canceled ? [] : result.filePaths;
 });
 
+// Shared directory picker used by output-folder selection and automation settings.
 ipcMain.handle("dialog:pick-output-directory", async () => {
   const options = {
     properties: ["openDirectory", "createDirectory"]
@@ -160,6 +167,7 @@ ipcMain.handle("dialog:pick-output-directory", async () => {
   return result.canceled ? null : result.filePaths[0];
 });
 
+// The remaining IPC handlers expose app features to the renderer through the preload bridge.
 ipcMain.handle("media:get-provider-statuses", async (_event, options: RenameOptions) => {
   return getProviderStatuses(options);
 });

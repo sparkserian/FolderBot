@@ -1,3 +1,4 @@
+// Automation history storage, repair support, and undo behavior for automated moves.
 import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
@@ -10,6 +11,7 @@ import type {
 } from "../shared/types";
 import { moveFile } from "./file-ops";
 
+// Load automation history from disk and normalize older entries.
 export async function getAutomationHistory(): Promise<AutomationHistoryEntry[]> {
   try {
     const contents = await fs.readFile(getAutomationHistoryPath(), "utf8");
@@ -24,10 +26,12 @@ export async function getAutomationHistory(): Promise<AutomationHistoryEntry[]> 
   }
 }
 
+// Persist the provided automation history array as-is.
 export async function saveAutomationHistory(history: AutomationHistoryEntry[]): Promise<void> {
   await writeAutomationHistory(history);
 }
 
+// Record a newly completed automation item so it can be undone or repaired later.
 export async function recordAutomationHistoryEntry(input: {
   sourceId: MetadataSourceId;
   originalInboxPath: string;
@@ -51,6 +55,7 @@ export async function recordAutomationHistoryEntry(input: {
   return nextEntry;
 }
 
+// Undo an automation item by restoring the inbox file and removing the mirror copy.
 export async function undoAutomationHistoryEntry(entryId: string): Promise<UndoAutomationHistoryResult> {
   const history = await getAutomationHistory();
   const entry = history.find((item) => item.id === entryId);
@@ -121,15 +126,18 @@ export async function undoAutomationHistoryEntry(entryId: string): Promise<UndoA
   };
 }
 
+// Automation history is kept in its own file under Electron's userData directory.
 function getAutomationHistoryPath(): string {
   return path.join(app.getPath("userData"), "automation-history.json");
 }
 
+// Persist the full automation history file after any change.
 async function writeAutomationHistory(history: AutomationHistoryEntry[]): Promise<void> {
   await fs.mkdir(path.dirname(getAutomationHistoryPath()), { recursive: true });
   await fs.writeFile(getAutomationHistoryPath(), JSON.stringify(history, null, 2), "utf8");
 }
 
+// Upgrade older saved entries into the current format expected by the UI and repair flow.
 function normalizeEntry(entry: AutomationHistoryEntry): AutomationHistoryEntry {
   return {
     id: entry.id || randomUUID(),

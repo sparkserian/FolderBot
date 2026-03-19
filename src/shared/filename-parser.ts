@@ -1,3 +1,4 @@
+// Filename parsing helpers that turn release-style file names into structured media data.
 import type { ParsedMedia } from "./types";
 
 const MEDIA_NOISE = [
@@ -56,6 +57,7 @@ const ABSOLUTE_EPISODE_PATTERN =
 const MOVIE_PATTERN =
   /^(.*?)[\s._(\[]((?:19|20)\d{2})(?:[)\]\s._-]|$)(.*)$/i;
 
+// Parse a raw filename into the structured media shape the rest of the app uses.
 export function parseMediaName(fileName: string): ParsedMedia {
   const nameWithoutExtension = fileName.replace(/\.[^/.]+$/, "");
   const normalizedInput = normalizeSeparators(nameWithoutExtension);
@@ -144,6 +146,7 @@ export function parseMediaName(fileName: string): ParsedMedia {
   };
 }
 
+// Convert parsed episode numbers into the standard code used in renamed files.
 export function formatEpisodeCode(
   season?: number,
   episode?: number,
@@ -160,6 +163,7 @@ export function formatEpisodeCode(
   return "Unsorted";
 }
 
+// Normalize human-readable titles so UI labels and filenames are consistent.
 export function toDisplayTitle(value: string): string {
   return value
     .split(/\s+/)
@@ -174,10 +178,12 @@ export function toDisplayTitle(value: string): string {
     .join(" ");
 }
 
+// Collapse the most common release separators before attempting regex matches.
 function normalizeSeparators(value: string): string {
   return value.replace(/[._]+/g, " ").replace(/\s+/g, " ").trim();
 }
 
+// Remove release noise and punctuation from a captured title fragment.
 function cleanupTitle(value: string): string {
   const noisePattern = new RegExp(`\\b(?:${MEDIA_NOISE.join("|")})\\b`, "gi");
 

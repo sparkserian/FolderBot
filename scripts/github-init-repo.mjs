@@ -1,3 +1,4 @@
+// Creates or connects the local git repository to the configured GitHub repository.
 import { githubRequest, gitOutput, printScriptUsage, readReleaseEnv, runGit } from "./github-common.mjs";
 
 if (process.argv.includes("--help")) {
@@ -23,6 +24,7 @@ console.log("1. git add .");
 console.log('2. git commit -m "Initial import"');
 console.log("3. git push -u origin main");
 
+// Initialize git locally if this folder is not already a repository.
 async function ensureLocalGitRepo() {
   try {
     await gitOutput(["rev-parse", "--is-inside-work-tree"]);
@@ -31,6 +33,7 @@ async function ensureLocalGitRepo() {
   }
 }
 
+// Create the GitHub repository if it does not already exist.
 async function ensureGithubRepoExists(ownerValue, repoValue, tokenValue) {
   try {
     await githubRequest(`/repos/${ownerValue}/${repoValue}`, { token: tokenValue });
@@ -66,6 +69,7 @@ async function ensureGithubRepoExists(ownerValue, repoValue, tokenValue) {
   });
 }
 
+// Point the local origin remote at the configured GitHub repository URL.
 async function configureOriginRemote(remoteUrlValue) {
   try {
     const currentUrl = await gitOutput(["remote", "get-url", "origin"]);

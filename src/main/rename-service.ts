@@ -1,3 +1,4 @@
+// Shared rename preview and execution logic used by the manual and automation workflows.
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { formatEpisodeCode, parseMediaName, toDisplayTitle } from "../shared/filename-parser";
@@ -16,10 +17,12 @@ const PREVIEW_CONCURRENCY = 8;
 
 const providers = createProviders();
 
+// Surface provider readiness and credential state to the renderer.
 export function getProviderStatuses(options: PreviewRequest["options"]) {
   return providers.map((provider) => provider.getStatus(options));
 }
 
+// Build rename previews for a batch of files, including metadata, warnings, and conflicts.
 export async function previewRenames(request: PreviewRequest): Promise<RenamePreview[]> {
   const provider = providers.find((entry) => entry.id === request.options.sourceId) ?? providers[0];
 
@@ -67,6 +70,7 @@ export async function previewRenames(request: PreviewRequest): Promise<RenamePre
   }));
 }
 
+// Apply the prepared rename batch and capture a result for every item.
 export async function applyRenames(request: ApplyRenameRequest): Promise<RenameResult[]> {
   const results: RenameResult[] = [];
 
@@ -106,6 +110,7 @@ export async function applyRenames(request: ApplyRenameRequest): Promise<RenameR
   return results;
 }
 
+// Build the output filename using whichever metadata is available for the file.
 function buildTargetName(
   metadata: ResolvedMetadata,
   parsed: RenamePreview["parsed"],
@@ -130,6 +135,7 @@ function buildTargetName(
   return `${displayTitle}${extension}`;
 }
 
+// Local fallback metadata keeps the app usable even when online lookups fail.
 function localFallbackMetadata(parsed: RenamePreview["parsed"]): ResolvedMetadata {
   return {
     sourceId: "local",
@@ -140,6 +146,7 @@ function localFallbackMetadata(parsed: RenamePreview["parsed"]): ResolvedMetadat
   };
 }
 
+// Manual title override replaces only the title used for matching, not the episode numbers.
 function applyManualTitleOverride(
   parsed: RenamePreview["parsed"],
   manualTitle?: string
@@ -155,6 +162,7 @@ function applyManualTitleOverride(
   };
 }
 
+// Conflict detection runs during preview so users can see problems before renaming.
 async function detectConflicts(sourcePath: string, targetPath: string): Promise<string[]> {
   if (sourcePath === targetPath) {
     return [];
@@ -168,6 +176,7 @@ async function detectConflicts(sourcePath: string, targetPath: string): Promise<
   }
 }
 
+// Remove invalid path characters while keeping filenames readable.
 function sanitizeFileSegment(value: string): string {
   const sanitized = value
     .replace(INVALID_FILENAME_CHARS, "")
@@ -178,6 +187,7 @@ function sanitizeFileSegment(value: string): string {
   return sanitizeWindowsReservedName(sanitized);
 }
 
+// Bounded parallelism keeps large preview batches fast without flooding provider lookups.
 async function mapWithConcurrency<T, R>(
   items: T[],
   concurrency: number,

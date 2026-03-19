@@ -1,3 +1,4 @@
+// Metadata provider implementations for local parsing, TMDb, and TheTVDB.
 import type {
   MetadataSourceId,
   ParsedMedia,
@@ -30,12 +31,14 @@ interface SearchableMetadataProvider extends MetadataProvider {
   ): Promise<ResolveResult>;
 }
 
+// Provider instances are cached so each provider can reuse its own request caches.
 let providerInstances: SearchableMetadataProvider[] | null = null;
 
 export function createProviders(): MetadataProvider[] {
   return getProviderInstances();
 }
 
+// Search provider-backed series candidates for the automation repair flow.
 export async function searchSeriesMatches(request: SearchSeriesRequest): Promise<ProviderSeriesSearchMatch[]> {
   const provider = getProviderInstances().find((entry) => entry.id === request.sourceId);
   if (!provider?.searchSeries) {
@@ -45,6 +48,7 @@ export async function searchSeriesMatches(request: SearchSeriesRequest): Promise
   return provider.searchSeries(request);
 }
 
+// Resolve a parsed episode against an exact show the user selected during repair.
 export async function resolveEpisodeFromSeriesMatch(
   parsed: ParsedMedia,
   match: ProviderSeriesSearchMatch,
@@ -61,6 +65,7 @@ export async function resolveEpisodeFromSeriesMatch(
   return provider.resolveEpisodeFromSeriesMatch(parsed, match, options);
 }
 
+// Lazy initialization keeps startup simple while still reusing provider caches.
 function getProviderInstances(): SearchableMetadataProvider[] {
   if (!providerInstances) {
     providerInstances = [new LocalMetadataProvider(), new TMDbMetadataProvider(), new TVDbMetadataProvider()];
@@ -72,6 +77,7 @@ function getProviderInstances(): SearchableMetadataProvider[] {
 const TVDB_BASE_URL = "https://api4.thetvdb.com/v4";
 const tvdbAuthCache = new Map<string, TVDbAuthCacheEntry>();
 
+// Local parsing is the zero-network fallback used when online providers are unavailable.
 class LocalMetadataProvider implements MetadataProvider {
   public readonly id = "local" as const;
   public readonly label = "Local Parser";
@@ -99,6 +105,7 @@ class LocalMetadataProvider implements MetadataProvider {
   }
 }
 
+// TMDb provider handles standard matching plus exact-series repair searches.
 class TMDbMetadataProvider implements SearchableMetadataProvider {
   public readonly id = "tmdb" as const;
   public readonly label = "TMDb";
@@ -339,6 +346,7 @@ class TMDbMetadataProvider implements SearchableMetadataProvider {
   }
 }
 
+// TVDB provider mirrors the TMDb behavior but with TVDB's auth and search endpoints.
 class TVDbMetadataProvider implements SearchableMetadataProvider {
   public readonly id = "tvdb" as const;
   public readonly label = "TheTVDB";
@@ -619,6 +627,7 @@ class TVDbMetadataProvider implements SearchableMetadataProvider {
   }
 }
 
+// Thin TMDb HTTP wrapper used by the provider methods above.
 async function tmdbRequest<T>(path: string, token: string): Promise<T> {
   const response = await fetch(`https://api.themoviedb.org/3${path}`, {
     headers: {
@@ -634,6 +643,7 @@ async function tmdbRequest<T>(path: string, token: string): Promise<T> {
   return (await response.json()) as T;
 }
 
+// Thin TVDB HTTP wrapper that automatically injects the login token.
 async function tvdbRequest<T>(path: string, options: RenameOptions): Promise<T> {
   const token = await getTVDbBearerToken(options);
   const response = await fetch(`${TVDB_BASE_URL}${path}`, {
@@ -651,6 +661,7 @@ async function tvdbRequest<T>(path: string, options: RenameOptions): Promise<T> 
   return payload.data;
 }
 
+// TVDB requires a login step before API calls can be made, so the token is cached here.
 async function getTVDbBearerToken(options: RenameOptions): Promise<string> {
   if (!options.tvdbApiKey) {
     throw new Error("Missing TVDB API key");
@@ -695,6 +706,7 @@ async function getTVDbBearerToken(options: RenameOptions): Promise<string> {
   return token;
 }
 
+// Assemble TVDB search parameters in one place so normal matching and repair search stay aligned.
 function buildTVDbSearchParams(input: {
   query: string;
   type: "series" | "movie";
@@ -715,6 +727,7 @@ function buildTVDbSearchParams(input: {
   return params.toString();
 }
 
+// TMDb and the UI use locale-style codes, while TVDB expects ISO-639-3 language codes.
 function toTVDbLanguage(language: string): string {
   const normalized = (language || "en-US").trim();
   const [base] = normalized.split(/[-_]/);
@@ -747,6 +760,7 @@ function toTVDbLanguage(language: string): string {
   return map[lowerBase] ?? "eng";
 }
 
+// Providers return years in different string formats, so parsing is centralized here.
 function parseOptionalYear(value?: string): number | undefined {
   if (!value) {
     return undefined;
@@ -756,6 +770,7 @@ function parseOptionalYear(value?: string): number | undefined {
   return Number.isNaN(parsed) ? undefined : parsed;
 }
 
+// TVDB search responses expose IDs under a few different field names.
 function getTVDbResultId(result?: TVDbSearchResult): number | undefined {
   const candidate = result?.tvdb_id ?? result?.objectID ?? result?.id;
   if (!candidate) {

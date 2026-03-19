@@ -1,3 +1,4 @@
+// Manual rename history storage and undo behavior.
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
@@ -12,6 +13,7 @@ import type {
 } from "../shared/types";
 import { moveFile } from "./file-ops";
 
+// Load manual rename history from disk.
 export async function getRenameHistory(): Promise<RenameHistoryEntry[]> {
   try {
     const contents = await fs.readFile(getHistoryPath(), "utf8");
@@ -26,6 +28,7 @@ export async function getRenameHistory(): Promise<RenameHistoryEntry[]> {
   }
 }
 
+// Persist a batch of successful manual renames for later undo.
 export async function recordRenameHistoryBatch(input: {
   sourceId: MetadataSourceId;
   results: RenameResult[];
@@ -56,6 +59,7 @@ export async function recordRenameHistoryBatch(input: {
   return nextEntry;
 }
 
+// Undo either the full batch or only the selected items.
 export async function undoRenameHistoryEntry(
   request: UndoRenameHistoryRequest
 ): Promise<UndoRenameHistoryResult> {
@@ -117,15 +121,18 @@ export async function undoRenameHistoryEntry(
   };
 }
 
+// Manual history lives in userData alongside the other app-owned state files.
 function getHistoryPath(): string {
   return path.join(app.getPath("userData"), "rename-history.json");
 }
 
+// Persist the full history array after recording or undoing changes.
 async function writeHistory(history: RenameHistoryEntry[]): Promise<void> {
   await fs.mkdir(path.dirname(getHistoryPath()), { recursive: true });
   await fs.writeFile(getHistoryPath(), JSON.stringify(history, null, 2), "utf8");
 }
 
+// Upgrade older saved history records into the current shape expected by the UI.
 function normalizeHistoryEntry(entry: RenameHistoryEntry): RenameHistoryEntry {
   return {
     ...entry,

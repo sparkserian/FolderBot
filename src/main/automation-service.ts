@@ -1,3 +1,4 @@
+// Automation watcher, folder-repair logic, and history-aware repair flows live here.
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { app } from "electron";
@@ -48,6 +49,7 @@ let scanInFlight = false;
 let processingCount = 0;
 const candidates = new Map<string, CandidateEntry>();
 const recentEvents: AutomationEvent[] = [];
+// Log writes are serialized so messages stay ordered in the on-disk automation log.
 let logWriteQueue = Promise.resolve();
 
 export function initializeAutomationService(
@@ -59,11 +61,13 @@ export function initializeAutomationService(
   restartWatcher();
 }
 
+// Any settings change that affects automation restarts the watcher with the new configuration.
 export function updateAutomationSettings(nextSettings: AppSettings): void {
   settings = nextSettings;
   restartWatcher();
 }
 
+// Provide the renderer with a snapshot of the watcher's current status.
 export function getAutomationStatus(): AutomationStatus {
   const currentSettings = settings;
 
@@ -81,6 +85,7 @@ export function getAutomationStatus(): AutomationStatus {
   };
 }
 
+// Move misplaced root-level episode files into season folders for a chosen show in both libraries.
 export async function repairSeasonPlacement(selectedFolderPath: string): Promise<RepairShowResult> {
   if (!settings) {
     throw new Error("Automation settings are not loaded yet");
@@ -121,6 +126,7 @@ export async function repairSeasonPlacement(selectedFolderPath: string): Promise
   };
 }
 
+// Repair one or more automation history items against a show the user selected from provider search.
 export async function repairAutomationHistoryEntries(
   request: AutomationRepairRequest
 ): Promise<AutomationRepairResult> {
@@ -256,6 +262,7 @@ export async function repairAutomationHistoryEntries(
   };
 }
 
+// Watcher lifecycle helpers.
 function restartWatcher(): void {
   stopWatcher();
   candidates.clear();
@@ -382,6 +389,7 @@ async function scanInboxDirectory(): Promise<void> {
   }
 }
 
+// Process one settled file all the way through rename, copy/move, and history recording.
 async function processSettledFile(candidate: CandidateEntry): Promise<void> {
   if (!settings) {
     return;
@@ -780,6 +788,7 @@ async function cleanupEmptyAncestors(startDirectory: string, libraryRoot: string
   }
 }
 
+// Event logging feeds both the renderer status panel and the persistent automation log file.
 function addEvent(message: string): void {
   recentEvents.unshift({
     createdAt: new Date().toISOString(),
@@ -836,6 +845,7 @@ function getAutomationLogPath(): string {
   return path.join(app.getPath("userData"), "automation.log");
 }
 
+// Internal representation of where a file should land inside a library root.
 type ResolvedLibraryTarget = {
   showDirectory: string;
   showCreated: boolean;

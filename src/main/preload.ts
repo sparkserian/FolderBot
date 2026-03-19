@@ -1,3 +1,4 @@
+// Safe, typed bridge that exposes a narrow Electron API to the renderer.
 import { contextBridge, ipcRenderer, webUtils } from "electron";
 import type {
   AppSettings,
@@ -16,6 +17,7 @@ import type {
   UndoRenameHistoryResult
 } from "../shared/types";
 
+// Only a narrow, typed surface is exposed to the renderer to keep the browser context isolated.
 contextBridge.exposeInMainWorld("folderBot", {
   pickFiles: () => ipcRenderer.invoke("dialog:pick-files"),
   pickOutputDirectory: () => ipcRenderer.invoke("dialog:pick-output-directory"),

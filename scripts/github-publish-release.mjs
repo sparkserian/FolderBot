@@ -1,3 +1,4 @@
+// Creates or updates a GitHub release for the current app version and uploads local artifacts.
 import fs from "node:fs/promises";
 import path from "node:path";
 import {
@@ -45,6 +46,7 @@ for (const artifactPath of artifacts) {
   console.log(`- ${path.basename(artifactPath)}`);
 }
 
+// Reuse an existing release for the tag if present; otherwise create a new one.
 async function ensureRelease(ownerValue, repoValue, tokenValue, { tagName: tag, releaseName: name, version: currentVersion }) {
   try {
     return await githubRequest(`/repos/${ownerValue}/${repoValue}/releases/tags/${tag}`, {
@@ -70,6 +72,7 @@ async function ensureRelease(ownerValue, repoValue, tokenValue, { tagName: tag, 
   });
 }
 
+// Replace an existing asset if needed so rerunning the script stays idempotent.
 async function uploadOrReplaceAsset(release, filePath, tokenValue) {
   const fileName = path.basename(filePath);
   const existingAsset = release.assets?.find((asset) => asset.name === fileName);
@@ -84,6 +87,7 @@ async function uploadOrReplaceAsset(release, filePath, tokenValue) {
   await githubUpload(release.upload_url, filePath, tokenValue);
 }
 
+// Collect only the versioned distributable files for the current build.
 async function findReleaseArtifacts(currentVersion) {
   const releaseDir = path.join(process.cwd(), "release");
   const entries = await fs.readdir(releaseDir, { withFileTypes: true });
@@ -95,6 +99,7 @@ async function findReleaseArtifacts(currentVersion) {
     .sort((left, right) => left.localeCompare(right));
 }
 
+// Filter out helper files and keep only uploadable release artifacts.
 function isVersionedArtifact(filePath, currentVersion) {
   const fileName = path.basename(filePath);
   if (!fileName.includes(currentVersion)) {
