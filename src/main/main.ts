@@ -1,5 +1,6 @@
 // Electron main-process bootstrap: window creation, menus, native dialogs, and IPC handlers.
 import { app, BrowserWindow, Menu, dialog, ipcMain } from "electron";
+import fs from "node:fs/promises";
 import path from "node:path";
 import {
   getAutomationStatus,
@@ -167,16 +168,15 @@ ipcMain.handle("dialog:pick-output-directory", async () => {
   return result.canceled ? null : result.filePaths[0];
 });
 
-// Multi-directory picker used by existing-show repair when the user selects several shows at once.
-ipcMain.handle("dialog:pick-output-directories", async () => {
-  const options = {
-    properties: ["openDirectory", "createDirectory", "multiSelections"]
-  } satisfies Electron.OpenDialogOptions;
+// Read the direct child folders under a configured library root for the repair folder picker.
+ipcMain.handle("automation:list-repair-directories", async (_event, rootPath: string) => {
+  const resolvedRoot = path.resolve(rootPath);
+  const entries = await fs.readdir(resolvedRoot, { withFileTypes: true });
 
-  const focusedWindow = mainWindow ?? BrowserWindow.getFocusedWindow();
-  const result = focusedWindow ? await dialog.showOpenDialog(focusedWindow, options) : await dialog.showOpenDialog(options);
-
-  return result.canceled ? [] : result.filePaths;
+  return entries
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => path.join(resolvedRoot, entry.name))
+    .sort((left, right) => left.localeCompare(right));
 });
 
 // The remaining IPC handlers expose app features to the renderer through the preload bridge.

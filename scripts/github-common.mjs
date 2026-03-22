@@ -53,8 +53,8 @@ export async function githubRequest(urlPath, { method = "GET", token, body, head
 }
 
 // Upload one local file as a GitHub release asset.
-export async function githubUpload(uploadUrl, filePath, token) {
-  const fileName = path.basename(filePath);
+export async function githubUpload(uploadUrl, filePath, token, assetName = path.basename(filePath)) {
+  const fileName = assetName;
   const fileBuffer = await fs.readFile(filePath);
   const targetUrl = `${uploadUrl.replace(/\{.*$/, "")}?name=${encodeURIComponent(fileName)}`;
 

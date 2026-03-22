@@ -373,7 +373,8 @@ select {
 
 .history-page,
 .help-page,
-.repair-page {
+.repair-page,
+.repair-folder-picker-page {
   display: grid;
   grid-template-rows: auto 1fr;
 }
@@ -640,6 +641,26 @@ select {
 .automation-repair-panel {
   display: grid;
   gap: 8px;
+}
+
+.repair-folder-picker-page {
+  grid-template-rows: auto 1fr auto;
+}
+
+.repair-folder-picker-body {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  min-height: 0;
+}
+
+.repair-folder-picker-select {
+  min-height: 320px;
+  width: 100%;
+  border: 1px solid var(--line);
+  background: #202020;
+  color: var(--text);
+  padding: 8px;
 }
 
 .repair-folder-list {

@@ -74,7 +74,7 @@ async function ensureRelease(ownerValue, repoValue, tokenValue, { tagName: tag, 
 
 // Replace an existing asset if needed so rerunning the script stays idempotent.
 async function uploadOrReplaceAsset(release, filePath, tokenValue) {
-  const fileName = path.basename(filePath);
+  const fileName = toReleaseAssetName(filePath);
   const existingAsset = release.assets?.find((asset) => asset.name === fileName);
 
   if (existingAsset) {
@@ -84,7 +84,7 @@ async function uploadOrReplaceAsset(release, filePath, tokenValue) {
     });
   }
 
-  await githubUpload(release.upload_url, filePath, tokenValue);
+  await githubUpload(release.upload_url, filePath, tokenValue, fileName);
 }
 
 // Collect only the versioned distributable files for the current build.
@@ -112,4 +112,8 @@ function isVersionedArtifact(filePath, currentVersion) {
 
   const extension = path.extname(fileName).toLowerCase();
   return [".exe", ".dmg", ".deb", ".appimage", ".zip", ".blockmap", ".7z"].includes(extension);
+}
+
+function toReleaseAssetName(filePath) {
+  return path.basename(filePath).replaceAll(" ", "-");
 }

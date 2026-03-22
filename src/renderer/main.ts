@@ -24,11 +24,11 @@ declare global {
     folderBot: {
       pickFiles: () => Promise<string[]>;
       pickOutputDirectory: () => Promise<string | null>;
-      pickOutputDirectories: () => Promise<string[]>;
       getPathForFile: (file: File) => string | null;
       getSettings: () => Promise<AppSettings>;
       saveSettings: (payload: Partial<AppSettings>) => Promise<AppSettings>;
       getAutomationStatus: () => Promise<AutomationStatus>;
+      listRepairDirectories: (rootPath: string) => Promise<string[]>;
       repairSeasonPlacement: (selectedFolderPaths: string[]) => Promise<RepairShowResult[]>;
       searchAutomationSeries: (payload: {
         sourceId: MetadataSourceId;
@@ -67,12 +67,14 @@ interface AppState {
   settingsDraft: AppSettings;
   automationStatus: AutomationStatus;
   repairShowFolderPaths: string[];
+  repairFolderCandidates: string[];
+  repairFolderPickerSelection: string[];
   historyEntries: RenameHistoryEntry[];
   automationHistoryEntries: AutomationHistoryEntry[];
   historySelection: Record<string, string[]>;
   automationHistorySelection: string[];
   historyTab: "manual" | "automation";
-  modal: "none" | "settings" | "history" | "help" | "repair";
+  modal: "none" | "settings" | "history" | "help" | "repair" | "repair-folders";
   repairSearchQuery: string;
   repairSearchSourceId: MetadataSourceId;
   repairSearchResults: ProviderSeriesSearchMatch[];
@@ -121,6 +123,8 @@ const state: AppState = {
   settingsDraft: DEFAULT_SETTINGS,
   automationStatus: DEFAULT_AUTOMATION_STATUS,
   repairShowFolderPaths: [],
+  repairFolderCandidates: [],
+  repairFolderPickerSelection: [],
   historyEntries: [],
   automationHistoryEntries: [],
   historySelection: {},
@@ -396,6 +400,27 @@ app.innerHTML = `
       </section>
     </section>
 
+    <section id="repairFolderPickerView" class="overlay view-hidden">
+      <section class="repair-folder-picker-page modal-panel" role="dialog" aria-modal="true" aria-labelledby="repairFolderPickerTitle">
+        <div class="settings-header">
+          <div class="history-header-copy">
+            <span id="repairFolderPickerTitle" class="pane-title">Choose Show Folders</span>
+            <span class="row-meta">Use Shift or Ctrl/Cmd to select multiple folders from the source library.</span>
+          </div>
+          <button id="repairFolderPickerBackButton" class="quiet-button" type="button">Cancel</button>
+        </div>
+
+        <div class="repair-folder-picker-body">
+          <p id="repairFolderPickerRoot" class="provider-note"></p>
+          <select id="repairFolderPickerSelect" class="repair-folder-picker-select" multiple size="16"></select>
+        </div>
+
+        <div class="settings-actions">
+          <button id="repairFolderPickerApplyButton" class="action-primary" type="button">Use selected folders</button>
+        </div>
+      </section>
+    </section>
+
     <section id="helpView" class="overlay view-hidden">
       <section class="help-page modal-panel" role="dialog" aria-modal="true" aria-labelledby="helpTitle">
         <div class="settings-header">
@@ -421,6 +446,7 @@ const workspaceView = requireElement<HTMLElement>("#workspaceView");
 const settingsView = requireElement<HTMLElement>("#settingsView");
 const historyView = requireElement<HTMLElement>("#historyView");
 const repairView = requireElement<HTMLElement>("#repairView");
+const repairFolderPickerView = requireElement<HTMLElement>("#repairFolderPickerView");
 const helpView = requireElement<HTMLElement>("#helpView");
 const historyButton = requireElement<HTMLButtonElement>("#historyButton");
 const historyRepairButton = requireElement<HTMLButtonElement>("#historyRepairButton");
@@ -436,6 +462,10 @@ const repairSearchList = requireElement<HTMLDivElement>("#repairSearchList");
 const repairDetailCard = requireElement<HTMLDivElement>("#repairDetailCard");
 const repairApplyButton = requireElement<HTMLButtonElement>("#repairApplyButton");
 const repairSelectionSummary = requireElement<HTMLSpanElement>("#repairSelectionSummary");
+const repairFolderPickerRoot = requireElement<HTMLParagraphElement>("#repairFolderPickerRoot");
+const repairFolderPickerSelect = requireElement<HTMLSelectElement>("#repairFolderPickerSelect");
+const repairFolderPickerBackButton = requireElement<HTMLButtonElement>("#repairFolderPickerBackButton");
+const repairFolderPickerApplyButton = requireElement<HTMLButtonElement>("#repairFolderPickerApplyButton");
 const settingsButton = requireElement<HTMLButtonElement>("#settingsButton");
 const settingsBackButton = requireElement<HTMLButtonElement>("#settingsBackButton");
 const settingsSaveButton = requireElement<HTMLButtonElement>("#settingsSaveButton");
@@ -530,6 +560,10 @@ function bindEvents(): void {
 
   repairBackButton.addEventListener("click", () => {
     closeRepairModal();
+  });
+
+  repairFolderPickerBackButton.addEventListener("click", () => {
+    closeRepairFolderPicker();
   });
 
   settingsButton.addEventListener("click", () => {
@@ -653,17 +687,22 @@ function bindEvents(): void {
   });
 
   repairShowFolderButton.addEventListener("click", async () => {
-    const selectedFolders = await window.folderBot.pickOutputDirectories();
-    if (selectedFolders.length === 0) {
-      return;
-    }
-
-    state.repairShowFolderPaths = selectedFolders;
-    render();
+    await openRepairFolderPicker();
   });
 
   repairShowRunButton.addEventListener("click", async () => {
     await runRepairSeasonPlacement();
+  });
+
+  repairFolderPickerApplyButton.addEventListener("click", () => {
+    state.repairShowFolderPaths = Array.from(repairFolderPickerSelect.selectedOptions).map((option) => option.value);
+    state.modal = "settings";
+    render();
+  });
+
+  repairFolderPickerSelect.addEventListener("change", () => {
+    state.repairFolderPickerSelection = Array.from(repairFolderPickerSelect.selectedOptions).map((option) => option.value);
+    render();
   });
 
   repairProviderSelect.addEventListener("change", () => {
@@ -901,6 +940,12 @@ function bindEvents(): void {
     }
   });
 
+  repairFolderPickerView.addEventListener("click", (event) => {
+    if (event.target === repairFolderPickerView) {
+      closeRepairFolderPicker();
+    }
+  });
+
   helpView.addEventListener("click", (event) => {
     if (event.target === helpView) {
       state.modal = "none";
@@ -910,7 +955,13 @@ function bindEvents(): void {
 
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && state.modal !== "none") {
-      state.modal = state.modal === "repair" ? "history" : "none";
+      if (state.modal === "repair") {
+        state.modal = "history";
+      } else if (state.modal === "repair-folders") {
+        state.modal = "settings";
+      } else {
+        state.modal = "none";
+      }
       render();
     }
   });
@@ -1002,6 +1053,7 @@ function render(): void {
   settingsView.classList.toggle("view-hidden", state.modal !== "settings");
   historyView.classList.toggle("view-hidden", state.modal !== "history");
   repairView.classList.toggle("view-hidden", state.modal !== "repair");
+  repairFolderPickerView.classList.toggle("view-hidden", state.modal !== "repair-folders");
   helpView.classList.toggle("view-hidden", state.modal !== "help");
   sourceSelect.value = state.sourceId;
   manualTitleInput.value = state.manualTitle;
@@ -1037,6 +1089,7 @@ function render(): void {
   renderInspector();
   renderHistoryList();
   renderRepairModal();
+  renderRepairFolderPicker();
   renderAutomationStatus();
   renderRepairShowFolderList();
 
@@ -1056,6 +1109,10 @@ function render(): void {
   historyBackButton.disabled = state.busy;
   repairBackButton.disabled = state.busy;
   repairProviderSelect.disabled = state.busy;
+  repairFolderPickerSelect.disabled = state.busy;
+  repairFolderPickerBackButton.disabled = state.busy;
+  repairFolderPickerApplyButton.disabled =
+    state.busy || state.repairFolderPickerSelection.length === 0 || state.modal !== "repair-folders";
   settingsBackButton.disabled = state.busy;
   settingsSaveButton.disabled = state.busy;
   settingsAutomationInboxButton.disabled = state.busy;
@@ -1293,6 +1350,26 @@ function renderRepairModal(): void {
   renderRepairDetailCard();
 }
 
+function renderRepairFolderPicker(): void {
+  const libraryRoot = state.settings.automationSourceLibraryDirectory.trim();
+  repairFolderPickerRoot.textContent = libraryRoot
+    ? `Source library: ${libraryRoot}`
+    : "Set and save the automation source library before selecting show folders.";
+
+  if (state.repairFolderCandidates.length === 0) {
+    repairFolderPickerSelect.innerHTML = "";
+    return;
+  }
+
+  repairFolderPickerSelect.innerHTML = state.repairFolderCandidates
+    .map((folderPath) => {
+      const parts = splitPath(folderPath);
+      const isSelected = state.repairFolderPickerSelection.includes(folderPath);
+      return `<option value="${escapeHtml(folderPath)}"${isSelected ? " selected" : ""}>${escapeHtml(parts.name)}</option>`;
+    })
+    .join("");
+}
+
 function renderRepairSearchList(): void {
   const selectionCount = state.automationHistorySelection.length;
   repairSelectionSummary.textContent =
@@ -1520,6 +1597,41 @@ function openAutomationRepairModal(): void {
 
 function closeRepairModal(): void {
   state.modal = "history";
+  render();
+}
+
+async function openRepairFolderPicker(): Promise<void> {
+  const libraryRoot = state.settings.automationSourceLibraryDirectory.trim();
+  if (!libraryRoot) {
+    state.message = "Save an automation source library first.";
+    render();
+    return;
+  }
+
+  state.busy = true;
+  state.message = "Loading show folders...";
+  render();
+
+  try {
+    state.repairFolderCandidates = await window.folderBot.listRepairDirectories(libraryRoot);
+    state.repairFolderPickerSelection = state.repairShowFolderPaths.filter((folderPath) =>
+      state.repairFolderCandidates.includes(folderPath)
+    );
+    state.modal = "repair-folders";
+    state.message =
+      state.repairFolderCandidates.length > 0
+        ? `Loaded ${state.repairFolderCandidates.length} show folder${state.repairFolderCandidates.length === 1 ? "" : "s"}.`
+        : "No show folders were found in the source library.";
+  } catch (error) {
+    state.message = error instanceof Error ? `Could not load show folders: ${error.message}` : "Could not load show folders.";
+  } finally {
+    state.busy = false;
+    render();
+  }
+}
+
+function closeRepairFolderPicker(): void {
+  state.modal = "settings";
   render();
 }
 
