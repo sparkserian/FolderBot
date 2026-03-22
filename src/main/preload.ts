@@ -21,6 +21,7 @@ import type {
 contextBridge.exposeInMainWorld("folderBot", {
   pickFiles: () => ipcRenderer.invoke("dialog:pick-files"),
   pickOutputDirectory: () => ipcRenderer.invoke("dialog:pick-output-directory"),
+  pickOutputDirectories: () => ipcRenderer.invoke("dialog:pick-output-directories") as Promise<string[]>,
   getPathForFile: (file: Parameters<typeof webUtils.getPathForFile>[0]) => {
     const path = webUtils.getPathForFile(file);
     return path || null;
@@ -28,8 +29,8 @@ contextBridge.exposeInMainWorld("folderBot", {
   getSettings: () => ipcRenderer.invoke("settings:get"),
   saveSettings: (payload: Partial<AppSettings>) => ipcRenderer.invoke("settings:save", payload),
   getAutomationStatus: () => ipcRenderer.invoke("automation:get-status") as Promise<AutomationStatus>,
-  repairSeasonPlacement: (selectedFolderPath: string) =>
-    ipcRenderer.invoke("automation:repair-show", selectedFolderPath) as Promise<RepairShowResult>,
+  repairSeasonPlacement: (selectedFolderPaths: string[]) =>
+    ipcRenderer.invoke("automation:repair-show", selectedFolderPaths) as Promise<RepairShowResult[]>,
   searchAutomationSeries: (payload: { sourceId: MetadataSourceId; query: string }) =>
     ipcRenderer.invoke("automation:search-series", payload) as Promise<ProviderSeriesSearchMatch[]>,
   repairAutomationHistoryEntries: (payload: AutomationRepairRequest) =>

@@ -642,6 +642,30 @@ select {
   gap: 8px;
 }
 
+.repair-folder-list {
+  min-height: 88px;
+  max-height: 168px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  background: #202020;
+}
+
+.repair-folder-item {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border-top: 1px solid #343434;
+}
+
+.repair-folder-item:first-child {
+  border-top: 0;
+}
+
+.repair-folder-item span {
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
 .help-copy strong {
   color: var(--text);
 }

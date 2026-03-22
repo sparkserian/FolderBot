@@ -24,11 +24,12 @@ declare global {
     folderBot: {
       pickFiles: () => Promise<string[]>;
       pickOutputDirectory: () => Promise<string | null>;
+      pickOutputDirectories: () => Promise<string[]>;
       getPathForFile: (file: File) => string | null;
       getSettings: () => Promise<AppSettings>;
       saveSettings: (payload: Partial<AppSettings>) => Promise<AppSettings>;
       getAutomationStatus: () => Promise<AutomationStatus>;
-      repairSeasonPlacement: (selectedFolderPath: string) => Promise<RepairShowResult>;
+      repairSeasonPlacement: (selectedFolderPaths: string[]) => Promise<RepairShowResult[]>;
       searchAutomationSeries: (payload: {
         sourceId: MetadataSourceId;
         query: string;
@@ -65,7 +66,7 @@ interface AppState {
   settings: AppSettings;
   settingsDraft: AppSettings;
   automationStatus: AutomationStatus;
-  repairShowFolderPath: string;
+  repairShowFolderPaths: string[];
   historyEntries: RenameHistoryEntry[];
   automationHistoryEntries: AutomationHistoryEntry[];
   historySelection: Record<string, string[]>;
@@ -119,7 +120,7 @@ const state: AppState = {
   settings: DEFAULT_SETTINGS,
   settingsDraft: DEFAULT_SETTINGS,
   automationStatus: DEFAULT_AUTOMATION_STATUS,
-  repairShowFolderPath: "",
+  repairShowFolderPaths: [],
   historyEntries: [],
   automationHistoryEntries: [],
   historySelection: {},
@@ -310,15 +311,16 @@ app.innerHTML = `
             <div id="automationStatusPanel" class="automation-status-panel"></div>
             <div class="automation-repair-panel">
               <span class="pane-title">Repair Existing Show</span>
-              <p class="provider-note">Pick one show folder once, then move misplaced episode files into the correct season folders in both the source and mirror libraries.</p>
+              <p class="provider-note">Pick one or more show folders, then move misplaced episode files into the correct season folders in both the source and mirror libraries.</p>
               <label class="control">
-                <span>Selected show folder</span>
+                <span>Selected show folders</span>
                 <div class="inline-control">
-                  <input id="repairShowFolderInput" type="text" placeholder="Choose a show folder or one of its season folders" readonly />
-                  <button id="repairShowFolderButton" class="quiet-button" type="button">Choose</button>
+                  <input id="repairShowFolderInput" type="text" placeholder="Choose one or more show folders or season folders" readonly />
+                  <button id="repairShowFolderButton" class="quiet-button" type="button">Choose folders</button>
                 </div>
               </label>
-              <button id="repairShowRunButton" class="action-secondary" type="button">Repair season placement</button>
+              <div id="repairShowFolderList" class="repair-folder-list empty-state">No show folders selected.</div>
+              <button id="repairShowRunButton" class="action-secondary" type="button">Repair selected shows</button>
             </div>
           </section>
         </div>
@@ -452,6 +454,7 @@ const settingsAutomationSource = requireElement<HTMLSelectElement>("#settingsAut
 const settingsAutomationSettleSeconds = requireElement<HTMLInputElement>("#settingsAutomationSettleSeconds");
 const automationStatusPanel = requireElement<HTMLDivElement>("#automationStatusPanel");
 const repairShowFolderInput = requireElement<HTMLInputElement>("#repairShowFolderInput");
+const repairShowFolderList = requireElement<HTMLDivElement>("#repairShowFolderList");
 const repairShowFolderButton = requireElement<HTMLButtonElement>("#repairShowFolderButton");
 const repairShowRunButton = requireElement<HTMLButtonElement>("#repairShowRunButton");
 const settingsTmdbStatus = requireElement<HTMLParagraphElement>("#settingsTmdbStatus");
@@ -650,12 +653,12 @@ function bindEvents(): void {
   });
 
   repairShowFolderButton.addEventListener("click", async () => {
-    const selectedFolder = await window.folderBot.pickOutputDirectory();
-    if (!selectedFolder) {
+    const selectedFolders = await window.folderBot.pickOutputDirectories();
+    if (selectedFolders.length === 0) {
       return;
     }
 
-    state.repairShowFolderPath = selectedFolder;
+    state.repairShowFolderPaths = selectedFolders;
     render();
   });
 
@@ -1013,7 +1016,7 @@ function render(): void {
   settingsAutomationMirrorLibraryDirectory.value = state.settingsDraft.automationMirrorLibraryDirectory;
   settingsAutomationSource.value = state.settingsDraft.automationSourceId;
   settingsAutomationSettleSeconds.value = String(state.settingsDraft.automationSettleSeconds);
-  repairShowFolderInput.value = state.repairShowFolderPath;
+  repairShowFolderInput.value = buildRepairFolderSummary();
   repairProviderSelect.value = state.repairSearchSourceId === "tmdb" ? "tmdb" : "tvdb";
   repairSearchInput.value = state.repairSearchQuery;
   message.textContent = state.message;
@@ -1035,6 +1038,7 @@ function render(): void {
   renderHistoryList();
   renderRepairModal();
   renderAutomationStatus();
+  renderRepairShowFolderList();
 
   matchButton.disabled =
     state.busy ||
@@ -1058,7 +1062,7 @@ function render(): void {
   settingsAutomationSourceLibraryButton.disabled = state.busy;
   settingsAutomationMirrorLibraryButton.disabled = state.busy;
   repairShowFolderButton.disabled = state.busy;
-  repairShowRunButton.disabled = state.busy || !state.repairShowFolderPath;
+  repairShowRunButton.disabled = state.busy || state.repairShowFolderPaths.length === 0;
   repairSearchButton.disabled = state.busy || state.repairSearchQuery.trim().length === 0;
   repairApplyButton.disabled = state.busy || !getActiveRepairMatch() || state.automationHistorySelection.length === 0;
   helpBackButton.disabled = state.busy;
@@ -1645,8 +1649,8 @@ async function undoAutomationHistoryEntry(entryId: string): Promise<void> {
 }
 
 async function runRepairSeasonPlacement(): Promise<void> {
-  if (!state.repairShowFolderPath) {
-    state.message = "Choose a show folder first.";
+  if (state.repairShowFolderPaths.length === 0) {
+    state.message = "Choose one or more show folders first.";
     render();
     return;
   }
@@ -1656,20 +1660,60 @@ async function runRepairSeasonPlacement(): Promise<void> {
   render();
 
   try {
-    const result = await window.folderBot.repairSeasonPlacement(state.repairShowFolderPath);
-    const movedCount = result.locations.reduce((sum, location) => sum + location.movedCount, 0);
-    const errorCount = result.locations.reduce((sum, location) => sum + location.errors.length, 0);
+    const results = await window.folderBot.repairSeasonPlacement(state.repairShowFolderPaths);
+    const movedCount = results.reduce(
+      (sum, result) => sum + result.locations.reduce((locationSum, location) => locationSum + location.movedCount, 0),
+      0
+    );
+    const errorCount = results.reduce(
+      (sum, result) => sum + result.locations.reduce((locationSum, location) => locationSum + location.errors.length, 0),
+      0
+    );
+    const showCount = results.length;
 
     state.message =
       errorCount > 0
-        ? `Repair moved ${movedCount} file${movedCount === 1 ? "" : "s"} with ${errorCount} error${errorCount === 1 ? "" : "s"}.`
-        : `Repair finished for ${result.showName}: ${movedCount} file${movedCount === 1 ? "" : "s"} moved.`;
+        ? `Repair updated ${showCount} show${showCount === 1 ? "" : "s"} and moved ${movedCount} file${movedCount === 1 ? "" : "s"} with ${errorCount} error${errorCount === 1 ? "" : "s"}.`
+        : `Repair finished for ${showCount} show${showCount === 1 ? "" : "s"}: ${movedCount} file${movedCount === 1 ? "" : "s"} moved.`;
   } catch (error) {
     state.message = error instanceof Error ? `Repair failed: ${error.message}` : "Repair failed.";
   } finally {
     state.busy = false;
     render();
   }
+}
+
+function renderRepairShowFolderList(): void {
+  if (state.repairShowFolderPaths.length === 0) {
+    repairShowFolderList.className = "repair-folder-list empty-state";
+    repairShowFolderList.textContent = "No show folders selected.";
+    return;
+  }
+
+  repairShowFolderList.className = "repair-folder-list";
+  repairShowFolderList.innerHTML = state.repairShowFolderPaths
+    .map((folderPath) => {
+      const parts = splitPath(folderPath);
+      return `
+        <div class="repair-folder-item">
+          <strong>${escapeHtml(parts.name)}</strong>
+          <span>${escapeHtml(folderPath)}</span>
+        </div>
+      `;
+    })
+    .join("");
+}
+
+function buildRepairFolderSummary(): string {
+  if (state.repairShowFolderPaths.length === 0) {
+    return "";
+  }
+
+  if (state.repairShowFolderPaths.length === 1) {
+    return state.repairShowFolderPaths[0];
+  }
+
+  return `${state.repairShowFolderPaths.length} show folders selected`;
 }
 
 async function undoHistoryEntry(entryId: string, itemIds?: string[]): Promise<void> {

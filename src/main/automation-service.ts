@@ -85,8 +85,33 @@ export function getAutomationStatus(): AutomationStatus {
   };
 }
 
-// Move misplaced root-level episode files into season folders for a chosen show in both libraries.
-export async function repairSeasonPlacement(selectedFolderPath: string): Promise<RepairShowResult> {
+// Move misplaced root-level episode files into season folders for one or more chosen shows.
+export async function repairSeasonPlacement(selectedFolderPaths: string[]): Promise<RepairShowResult[]> {
+  if (selectedFolderPaths.length === 0) {
+    throw new Error("No show folders were selected for repair");
+  }
+
+  const dedupedSelections = new Map<string, string>();
+
+  for (const selectedFolderPath of selectedFolderPaths) {
+    const normalizedSelection = path.resolve(selectedFolderPath);
+    const selectedShowPath = await resolveSelectedShowPath(normalizedSelection);
+
+    if (!dedupedSelections.has(selectedShowPath)) {
+      dedupedSelections.set(selectedShowPath, normalizedSelection);
+    }
+  }
+
+  const results: RepairShowResult[] = [];
+
+  for (const selectedFolderPath of dedupedSelections.values()) {
+    results.push(await repairSingleSeasonPlacement(selectedFolderPath));
+  }
+
+  return results;
+}
+
+async function repairSingleSeasonPlacement(selectedFolderPath: string): Promise<RepairShowResult> {
   if (!settings) {
     throw new Error("Automation settings are not loaded yet");
   }

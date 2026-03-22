@@ -167,6 +167,18 @@ ipcMain.handle("dialog:pick-output-directory", async () => {
   return result.canceled ? null : result.filePaths[0];
 });
 
+// Multi-directory picker used by existing-show repair when the user selects several shows at once.
+ipcMain.handle("dialog:pick-output-directories", async () => {
+  const options = {
+    properties: ["openDirectory", "createDirectory", "multiSelections"]
+  } satisfies Electron.OpenDialogOptions;
+
+  const focusedWindow = mainWindow ?? BrowserWindow.getFocusedWindow();
+  const result = focusedWindow ? await dialog.showOpenDialog(focusedWindow, options) : await dialog.showOpenDialog(options);
+
+  return result.canceled ? [] : result.filePaths;
+});
+
 // The remaining IPC handlers expose app features to the renderer through the preload bridge.
 ipcMain.handle("media:get-provider-statuses", async (_event, options: RenameOptions) => {
   return getProviderStatuses(options);
@@ -186,8 +198,8 @@ ipcMain.handle("automation:get-status", async () => {
   return getAutomationStatus();
 });
 
-ipcMain.handle("automation:repair-show", async (_event, selectedFolderPath: string) => {
-  return repairSeasonPlacement(selectedFolderPath);
+ipcMain.handle("automation:repair-show", async (_event, selectedFolderPaths: string[]) => {
+  return repairSeasonPlacement(selectedFolderPaths);
 });
 
 ipcMain.handle("automation:search-series", async (_event, payload: Pick<SearchSeriesRequest, "sourceId" | "query">) => {
