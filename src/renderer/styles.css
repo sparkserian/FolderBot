@@ -373,8 +373,7 @@ select {
 
 .history-page,
 .help-page,
-.repair-page,
-.repair-folder-picker-page {
+.repair-page {
   display: grid;
   grid-template-rows: auto 1fr;
 }
@@ -643,26 +642,6 @@ select {
   gap: 8px;
 }
 
-.repair-folder-picker-page {
-  grid-template-rows: auto 1fr auto;
-}
-
-.repair-folder-picker-body {
-  display: grid;
-  gap: 10px;
-  padding: 12px;
-  min-height: 0;
-}
-
-.repair-folder-picker-select {
-  min-height: 320px;
-  width: 100%;
-  border: 1px solid var(--line);
-  background: #202020;
-  color: var(--text);
-  padding: 8px;
-}
-
 .repair-folder-list {
   min-height: 88px;
   max-height: 168px;
@@ -676,6 +655,13 @@ select {
   gap: 4px;
   padding: 10px 12px;
   border-top: 1px solid #343434;
+}
+
+.repair-folder-item-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 .repair-folder-item:first-child {

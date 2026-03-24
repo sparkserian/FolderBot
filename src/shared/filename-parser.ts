@@ -24,11 +24,17 @@ const MEDIA_NOISE = [
   "extended",
   "limited",
   "hdr",
+  "hdr10",
+  "hdr10+",
   "uhd",
   "10bit",
   "aac",
   "ddp",
   "atmos",
+  "dovi",
+  "dv",
+  "dolbyvision",
+  "dolby-vision",
   "amzn",
   "nf",
   "dsnp",
@@ -56,6 +62,25 @@ const ABSOLUTE_EPISODE_PATTERN =
 
 const MOVIE_PATTERN =
   /^(.*?)[\s._(\[]((?:19|20)\d{2})(?:[)\]\s._-]|$)(.*)$/i;
+
+const MOVIE_SOURCE_PATTERNS = [
+  { pattern: /\bremux\b/i, label: "Remux" },
+  { pattern: /\bweb[ ._-]?rip\b/i, label: "WEBRip" },
+  { pattern: /\bweb[ ._-]?dl\b/i, label: "WEB-DL" },
+  { pattern: /\bblu[ ._-]?ray\b/i, label: "BluRay" },
+  { pattern: /\bbd[ ._-]?rip\b/i, label: "BDRip" },
+  { pattern: /\bbr[ ._-]?rip\b/i, label: "BRRip" },
+  { pattern: /\bdvd[ ._-]?rip\b/i, label: "DVDRip" },
+  { pattern: /\bhd[ ._-]?rip\b/i, label: "HDRip" }
+] as const;
+
+const MOVIE_CODEC_PATTERNS = [
+  { pattern: /\bx265\b/i, label: "x265" },
+  { pattern: /\bx264\b/i, label: "x264" },
+  { pattern: /\bhevc\b/i, label: "HEVC" },
+  { pattern: /\bh265\b/i, label: "H265" },
+  { pattern: /\bh264\b/i, label: "H264" }
+] as const;
 
 // Parse a raw filename into the structured media shape the rest of the app uses.
 export function parseMediaName(fileName: string): ParsedMedia {
@@ -126,11 +151,16 @@ export function parseMediaName(fileName: string): ParsedMedia {
   const movieMatch = normalizedInput.match(MOVIE_PATTERN);
   if (movieMatch) {
     const title = cleanupTitle(movieMatch[1]);
+    const movieDetails = extractMovieDetails(movieMatch[3] || "");
     return {
       kind: "movie",
       originalTitle: fileName,
       normalizedTitle: title || "Unknown Movie",
       year: Number.parseInt(movieMatch[2], 10),
+      sourceTag: movieDetails.sourceTag,
+      videoTags: movieDetails.videoTags,
+      videoCodecTag: movieDetails.videoCodecTag,
+      resolution: movieDetails.resolution,
       confidence: 0.86,
       warnings: title ? [] : ["Could not confidently extract a movie title."]
     };
@@ -196,4 +226,37 @@ function cleanupTitle(value: string): string {
       .replace(/\s+/g, " ")
       .trim()
   );
+}
+
+function extractMovieDetails(value: string): {
+  sourceTag?: string;
+  videoTags: string[];
+  videoCodecTag?: string;
+  resolution?: string;
+} {
+  const normalizedValue = normalizeSeparators(value).toLowerCase();
+  const sourceTag = MOVIE_SOURCE_PATTERNS.find((entry) => entry.pattern.test(normalizedValue))?.label;
+  const videoCodecTag = MOVIE_CODEC_PATTERNS.find((entry) => entry.pattern.test(normalizedValue))?.label;
+  const videoTags: string[] = [];
+
+  if (/\bhdr10\+\b/i.test(normalizedValue)) {
+    videoTags.push("HDR10+");
+  } else if (/\bhdr10\b/i.test(normalizedValue)) {
+    videoTags.push("HDR10");
+  } else if (/\bhdr\b/i.test(normalizedValue)) {
+    videoTags.push("HDR");
+  }
+
+  if (/\b(?:dovi|dolby[ ._-]?vision|dv)\b/i.test(normalizedValue)) {
+    videoTags.push("DV");
+  }
+
+  const resolution = normalizedValue.match(/\b(2160p|1080p|720p|480p)\b/i)?.[1];
+
+  return {
+    sourceTag,
+    videoTags,
+    videoCodecTag,
+    resolution: resolution ? `${resolution.slice(0, -1)}p` : undefined
+  };
 }

@@ -34,6 +34,7 @@ export async function saveAutomationHistory(history: AutomationHistoryEntry[]): 
 // Record a newly completed automation item so it can be undone or repaired later.
 export async function recordAutomationHistoryEntry(input: {
   sourceId: MetadataSourceId;
+  mediaKind: AutomationHistoryEntry["mediaKind"];
   originalInboxPath: string;
   sourceLibraryPath: string;
   mirrorLibraryPath: string;
@@ -43,6 +44,7 @@ export async function recordAutomationHistoryEntry(input: {
     id: randomUUID(),
     createdAt: new Date().toISOString(),
     sourceId: input.sourceId,
+    mediaKind: input.mediaKind,
     originalInboxPath: input.originalInboxPath,
     sourceLibraryPath: input.sourceLibraryPath,
     mirrorLibraryPath: input.mirrorLibraryPath,
@@ -143,6 +145,7 @@ function normalizeEntry(entry: AutomationHistoryEntry): AutomationHistoryEntry {
     id: entry.id || randomUUID(),
     createdAt: entry.createdAt,
     sourceId: entry.sourceId,
+    mediaKind: entry.mediaKind === "movie" ? "movie" : "episode",
     originalInboxPath: entry.originalInboxPath,
     sourceLibraryPath: entry.sourceLibraryPath,
     mirrorLibraryPath: entry.mirrorLibraryPath,

@@ -9,10 +9,13 @@ const DEFAULT_SETTINGS: AppSettings = {
   tvdbApiKey: "",
   tvdbPin: "",
   defaultLanguage: "en-US",
+  launchAtLogin: false,
   automationEnabled: false,
   automationInboxDirectory: "",
   automationSourceLibraryDirectory: "",
   automationMirrorLibraryDirectory: "",
+  automationMovieSourceDirectory: "",
+  automationMovieMirrorDirectory: "",
   automationSourceId: "tvdb",
   automationSettleSeconds: 45
 };
@@ -33,6 +36,7 @@ export async function getSettings(): Promise<AppSettings> {
       tvdbApiKey: parsed.tvdbApiKey ?? DEFAULT_SETTINGS.tvdbApiKey,
       tvdbPin: parsed.tvdbPin ?? DEFAULT_SETTINGS.tvdbPin,
       defaultLanguage: parsed.defaultLanguage ?? DEFAULT_SETTINGS.defaultLanguage,
+      launchAtLogin: parsed.launchAtLogin ?? DEFAULT_SETTINGS.launchAtLogin,
       automationEnabled: parsed.automationEnabled ?? DEFAULT_SETTINGS.automationEnabled,
       automationInboxDirectory:
         parsed.automationInboxDirectory ??
@@ -45,6 +49,12 @@ export async function getSettings(): Promise<AppSettings> {
         parsed.automationMirrorLibraryDirectory ??
         parsed.automationLibraryDirectory ??
         DEFAULT_SETTINGS.automationMirrorLibraryDirectory,
+      automationMovieSourceDirectory:
+        parsed.automationMovieSourceDirectory ??
+        DEFAULT_SETTINGS.automationMovieSourceDirectory,
+      automationMovieMirrorDirectory:
+        parsed.automationMovieMirrorDirectory ??
+        DEFAULT_SETTINGS.automationMovieMirrorDirectory,
       automationSourceId: normalizeAutomationSourceId(parsed.automationSourceId),
       automationSettleSeconds: normalizeAutomationSettleSeconds(parsed.automationSettleSeconds)
     };
@@ -82,12 +92,17 @@ function normalizeSettings(input: Partial<AppSettings>): Partial<AppSettings> {
     tvdbApiKey: input.tvdbApiKey?.trim(),
     tvdbPin: input.tvdbPin?.trim(),
     defaultLanguage: input.defaultLanguage?.trim() || DEFAULT_SETTINGS.defaultLanguage,
+    launchAtLogin: input.launchAtLogin ?? DEFAULT_SETTINGS.launchAtLogin,
     automationEnabled: input.automationEnabled ?? DEFAULT_SETTINGS.automationEnabled,
     automationInboxDirectory: input.automationInboxDirectory?.trim() ?? DEFAULT_SETTINGS.automationInboxDirectory,
     automationSourceLibraryDirectory:
       input.automationSourceLibraryDirectory?.trim() ?? DEFAULT_SETTINGS.automationSourceLibraryDirectory,
     automationMirrorLibraryDirectory:
       input.automationMirrorLibraryDirectory?.trim() ?? DEFAULT_SETTINGS.automationMirrorLibraryDirectory,
+    automationMovieSourceDirectory:
+      input.automationMovieSourceDirectory?.trim() ?? DEFAULT_SETTINGS.automationMovieSourceDirectory,
+    automationMovieMirrorDirectory:
+      input.automationMovieMirrorDirectory?.trim() ?? DEFAULT_SETTINGS.automationMovieMirrorDirectory,
     automationSourceId: normalizeAutomationSourceId(input.automationSourceId),
     automationSettleSeconds: normalizeAutomationSettleSeconds(input.automationSettleSeconds)
   };

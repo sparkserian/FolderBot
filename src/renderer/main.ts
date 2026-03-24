@@ -24,11 +24,11 @@ declare global {
     folderBot: {
       pickFiles: () => Promise<string[]>;
       pickOutputDirectory: () => Promise<string | null>;
+      pickOutputDirectories: () => Promise<string[]>;
       getPathForFile: (file: File) => string | null;
       getSettings: () => Promise<AppSettings>;
       saveSettings: (payload: Partial<AppSettings>) => Promise<AppSettings>;
       getAutomationStatus: () => Promise<AutomationStatus>;
-      listRepairDirectories: (rootPath: string) => Promise<string[]>;
       repairSeasonPlacement: (selectedFolderPaths: string[]) => Promise<RepairShowResult[]>;
       searchAutomationSeries: (payload: {
         sourceId: MetadataSourceId;
@@ -67,14 +67,12 @@ interface AppState {
   settingsDraft: AppSettings;
   automationStatus: AutomationStatus;
   repairShowFolderPaths: string[];
-  repairFolderCandidates: string[];
-  repairFolderPickerSelection: string[];
   historyEntries: RenameHistoryEntry[];
   automationHistoryEntries: AutomationHistoryEntry[];
   historySelection: Record<string, string[]>;
   automationHistorySelection: string[];
   historyTab: "manual" | "automation";
-  modal: "none" | "settings" | "history" | "help" | "repair" | "repair-folders";
+  modal: "none" | "settings" | "history" | "help" | "repair";
   repairSearchQuery: string;
   repairSearchSourceId: MetadataSourceId;
   repairSearchResults: ProviderSeriesSearchMatch[];
@@ -90,10 +88,13 @@ const DEFAULT_SETTINGS: AppSettings = {
   tvdbApiKey: "",
   tvdbPin: "",
   defaultLanguage: "en-US",
+  launchAtLogin: false,
   automationEnabled: false,
   automationInboxDirectory: "",
   automationSourceLibraryDirectory: "",
   automationMirrorLibraryDirectory: "",
+  automationMovieSourceDirectory: "",
+  automationMovieMirrorDirectory: "",
   automationSourceId: "tvdb",
   automationSettleSeconds: 45
 };
@@ -105,6 +106,8 @@ const DEFAULT_AUTOMATION_STATUS: AutomationStatus = {
   inboxDirectory: "",
   sourceLibraryDirectory: "",
   mirrorLibraryDirectory: "",
+  movieSourceDirectory: "",
+  movieMirrorDirectory: "",
   sourceId: "tvdb",
   settleSeconds: 45,
   pendingCount: 0,
@@ -123,8 +126,6 @@ const state: AppState = {
   settingsDraft: DEFAULT_SETTINGS,
   automationStatus: DEFAULT_AUTOMATION_STATUS,
   repairShowFolderPaths: [],
-  repairFolderCandidates: [],
-  repairFolderPickerSelection: [],
   historyEntries: [],
   automationHistoryEntries: [],
   historySelection: {},
@@ -271,7 +272,11 @@ app.innerHTML = `
 
           <section class="settings-section settings-section-wide">
             <span class="pane-title">Automation</span>
-            <p class="provider-note">Manual renaming stays on the main screen. This section is only for the separate watcher workflow and currently supports TV episodes only.</p>
+            <p class="provider-note">Manual renaming stays on the main screen. This section controls the separate watcher workflow for both TV episodes and movies.</p>
+            <label class="control checkbox-control">
+              <span>Launch at login</span>
+              <input id="settingsLaunchAtLogin" type="checkbox" />
+            </label>
             <label class="control checkbox-control">
               <span>Enable watcher</span>
               <input id="settingsAutomationEnabled" type="checkbox" />
@@ -284,17 +289,31 @@ app.innerHTML = `
               </div>
             </label>
             <label class="control">
-              <span>Source library root</span>
+              <span>TV source library root</span>
               <div class="inline-control">
                 <input id="settingsAutomationSourceLibraryDirectory" type="text" placeholder="Organized library on the source drive" readonly />
                 <button id="settingsAutomationSourceLibraryButton" class="quiet-button" type="button">Choose</button>
               </div>
             </label>
             <label class="control">
-              <span>Mirror library root</span>
+              <span>TV mirror library root</span>
               <div class="inline-control">
                 <input id="settingsAutomationMirrorLibraryDirectory" type="text" placeholder="Matching library on the mirror drive" readonly />
                 <button id="settingsAutomationMirrorLibraryButton" class="quiet-button" type="button">Choose</button>
+              </div>
+            </label>
+            <label class="control">
+              <span>Movie source library root</span>
+              <div class="inline-control">
+                <input id="settingsAutomationMovieSourceDirectory" type="text" placeholder="Organized movie library on the source drive" readonly />
+                <button id="settingsAutomationMovieSourceButton" class="quiet-button" type="button">Choose</button>
+              </div>
+            </label>
+            <label class="control">
+              <span>Movie mirror library root</span>
+              <div class="inline-control">
+                <input id="settingsAutomationMovieMirrorDirectory" type="text" placeholder="Matching movie library on the mirror drive" readonly />
+                <button id="settingsAutomationMovieMirrorButton" class="quiet-button" type="button">Choose</button>
               </div>
             </label>
             <div class="settings-inline-grid">
@@ -311,16 +330,17 @@ app.innerHTML = `
                 <input id="settingsAutomationSettleSeconds" type="number" min="10" max="600" step="5" />
               </label>
             </div>
-            <p class="provider-note">Flow: detect a completed TV episode in the inbox, rename it, copy it to the mirror library, then move it into the organized source library.</p>
+            <p class="provider-note">Flow: detect a completed media file in the inbox, rename it, copy it to the matching mirror library, then move it into the matching source library. Episodes create show and season folders; movies stay flat in the movie root. If launch at login is enabled, FolderBot starts in the background and closing the window keeps it running in the tray.</p>
             <div id="automationStatusPanel" class="automation-status-panel"></div>
             <div class="automation-repair-panel">
               <span class="pane-title">Repair Existing Show</span>
-              <p class="provider-note">Pick one or more show folders, then move misplaced episode files into the correct season folders in both the source and mirror libraries.</p>
+              <p class="provider-note">Use the normal folder browser to select one or more show or season folders from any drive in a single step, then repair them together.</p>
               <label class="control">
                 <span>Selected show folders</span>
                 <div class="inline-control">
-                  <input id="repairShowFolderInput" type="text" placeholder="Choose one or more show folders or season folders" readonly />
+                  <input id="repairShowFolderInput" type="text" placeholder="Add show folders or season folders to the repair list" readonly />
                   <button id="repairShowFolderButton" class="quiet-button" type="button">Choose folders</button>
+                  <button id="repairShowClearButton" class="quiet-button" type="button">Clear</button>
                 </div>
               </label>
               <div id="repairShowFolderList" class="repair-folder-list empty-state">No show folders selected.</div>
@@ -400,27 +420,6 @@ app.innerHTML = `
       </section>
     </section>
 
-    <section id="repairFolderPickerView" class="overlay view-hidden">
-      <section class="repair-folder-picker-page modal-panel" role="dialog" aria-modal="true" aria-labelledby="repairFolderPickerTitle">
-        <div class="settings-header">
-          <div class="history-header-copy">
-            <span id="repairFolderPickerTitle" class="pane-title">Choose Show Folders</span>
-            <span class="row-meta">Use Shift or Ctrl/Cmd to select multiple folders from the source library.</span>
-          </div>
-          <button id="repairFolderPickerBackButton" class="quiet-button" type="button">Cancel</button>
-        </div>
-
-        <div class="repair-folder-picker-body">
-          <p id="repairFolderPickerRoot" class="provider-note"></p>
-          <select id="repairFolderPickerSelect" class="repair-folder-picker-select" multiple size="16"></select>
-        </div>
-
-        <div class="settings-actions">
-          <button id="repairFolderPickerApplyButton" class="action-primary" type="button">Use selected folders</button>
-        </div>
-      </section>
-    </section>
-
     <section id="helpView" class="overlay view-hidden">
       <section class="help-page modal-panel" role="dialog" aria-modal="true" aria-labelledby="helpTitle">
         <div class="settings-header">
@@ -435,7 +434,7 @@ app.innerHTML = `
           <p>4. Click <strong>Match</strong> to preview the renamed results on the right.</p>
           <p>5. Review the preview, then click <strong>Rename</strong> to apply the changes.</p>
           <p>6. Open <strong>History</strong> if you need to undo the whole batch or only selected items.</p>
-          <p>Automation is configured separately in Settings. It currently watches TV episodes only, waits for a file to settle, renames it, copies it to the mirror library, then moves it into the organized source library.</p>
+          <p>Automation is configured separately in Settings. It watches the inbox for settled TV episodes and movies, renames them, copies them to the matching mirror library, then moves them into the matching source library.</p>
         </div>
       </section>
     </section>
@@ -446,7 +445,6 @@ const workspaceView = requireElement<HTMLElement>("#workspaceView");
 const settingsView = requireElement<HTMLElement>("#settingsView");
 const historyView = requireElement<HTMLElement>("#historyView");
 const repairView = requireElement<HTMLElement>("#repairView");
-const repairFolderPickerView = requireElement<HTMLElement>("#repairFolderPickerView");
 const helpView = requireElement<HTMLElement>("#helpView");
 const historyButton = requireElement<HTMLButtonElement>("#historyButton");
 const historyRepairButton = requireElement<HTMLButtonElement>("#historyRepairButton");
@@ -462,10 +460,6 @@ const repairSearchList = requireElement<HTMLDivElement>("#repairSearchList");
 const repairDetailCard = requireElement<HTMLDivElement>("#repairDetailCard");
 const repairApplyButton = requireElement<HTMLButtonElement>("#repairApplyButton");
 const repairSelectionSummary = requireElement<HTMLSpanElement>("#repairSelectionSummary");
-const repairFolderPickerRoot = requireElement<HTMLParagraphElement>("#repairFolderPickerRoot");
-const repairFolderPickerSelect = requireElement<HTMLSelectElement>("#repairFolderPickerSelect");
-const repairFolderPickerBackButton = requireElement<HTMLButtonElement>("#repairFolderPickerBackButton");
-const repairFolderPickerApplyButton = requireElement<HTMLButtonElement>("#repairFolderPickerApplyButton");
 const settingsButton = requireElement<HTMLButtonElement>("#settingsButton");
 const settingsBackButton = requireElement<HTMLButtonElement>("#settingsBackButton");
 const settingsSaveButton = requireElement<HTMLButtonElement>("#settingsSaveButton");
@@ -473,6 +467,7 @@ const settingsTmdbToken = requireElement<HTMLInputElement>("#settingsTmdbToken")
 const settingsTvdbApiKey = requireElement<HTMLInputElement>("#settingsTvdbApiKey");
 const settingsTvdbPin = requireElement<HTMLInputElement>("#settingsTvdbPin");
 const settingsLanguage = requireElement<HTMLInputElement>("#settingsLanguage");
+const settingsLaunchAtLogin = requireElement<HTMLInputElement>("#settingsLaunchAtLogin");
 const settingsAutomationEnabled = requireElement<HTMLInputElement>("#settingsAutomationEnabled");
 const settingsAutomationInboxDirectory = requireElement<HTMLInputElement>("#settingsAutomationInboxDirectory");
 const settingsAutomationInboxButton = requireElement<HTMLButtonElement>("#settingsAutomationInboxButton");
@@ -480,12 +475,17 @@ const settingsAutomationSourceLibraryDirectory = requireElement<HTMLInputElement
 const settingsAutomationSourceLibraryButton = requireElement<HTMLButtonElement>("#settingsAutomationSourceLibraryButton");
 const settingsAutomationMirrorLibraryDirectory = requireElement<HTMLInputElement>("#settingsAutomationMirrorLibraryDirectory");
 const settingsAutomationMirrorLibraryButton = requireElement<HTMLButtonElement>("#settingsAutomationMirrorLibraryButton");
+const settingsAutomationMovieSourceDirectory = requireElement<HTMLInputElement>("#settingsAutomationMovieSourceDirectory");
+const settingsAutomationMovieSourceButton = requireElement<HTMLButtonElement>("#settingsAutomationMovieSourceButton");
+const settingsAutomationMovieMirrorDirectory = requireElement<HTMLInputElement>("#settingsAutomationMovieMirrorDirectory");
+const settingsAutomationMovieMirrorButton = requireElement<HTMLButtonElement>("#settingsAutomationMovieMirrorButton");
 const settingsAutomationSource = requireElement<HTMLSelectElement>("#settingsAutomationSource");
 const settingsAutomationSettleSeconds = requireElement<HTMLInputElement>("#settingsAutomationSettleSeconds");
 const automationStatusPanel = requireElement<HTMLDivElement>("#automationStatusPanel");
 const repairShowFolderInput = requireElement<HTMLInputElement>("#repairShowFolderInput");
 const repairShowFolderList = requireElement<HTMLDivElement>("#repairShowFolderList");
 const repairShowFolderButton = requireElement<HTMLButtonElement>("#repairShowFolderButton");
+const repairShowClearButton = requireElement<HTMLButtonElement>("#repairShowClearButton");
 const repairShowRunButton = requireElement<HTMLButtonElement>("#repairShowRunButton");
 const settingsTmdbStatus = requireElement<HTMLParagraphElement>("#settingsTmdbStatus");
 const settingsTvdbStatus = requireElement<HTMLParagraphElement>("#settingsTvdbStatus");
@@ -562,10 +562,6 @@ function bindEvents(): void {
     closeRepairModal();
   });
 
-  repairFolderPickerBackButton.addEventListener("click", () => {
-    closeRepairFolderPicker();
-  });
-
   settingsButton.addEventListener("click", () => {
     state.settingsDraft = { ...state.settings };
     state.modal = "settings";
@@ -588,10 +584,13 @@ function bindEvents(): void {
       tvdbApiKey: settingsTvdbApiKey.value,
       tvdbPin: settingsTvdbPin.value,
       defaultLanguage: settingsLanguage.value,
+      launchAtLogin: settingsLaunchAtLogin.checked,
       automationEnabled: settingsAutomationEnabled.checked,
       automationInboxDirectory: settingsAutomationInboxDirectory.value,
       automationSourceLibraryDirectory: settingsAutomationSourceLibraryDirectory.value,
       automationMirrorLibraryDirectory: settingsAutomationMirrorLibraryDirectory.value,
+      automationMovieSourceDirectory: settingsAutomationMovieSourceDirectory.value,
+      automationMovieMirrorDirectory: settingsAutomationMovieMirrorDirectory.value,
       automationSourceId: settingsAutomationSource.value as MetadataSourceId,
       automationSettleSeconds: Number(settingsAutomationSettleSeconds.value) || 45
     };
@@ -644,6 +643,10 @@ function bindEvents(): void {
     state.settingsDraft.defaultLanguage = settingsLanguage.value;
   });
 
+  settingsLaunchAtLogin.addEventListener("change", () => {
+    state.settingsDraft.launchAtLogin = settingsLaunchAtLogin.checked;
+  });
+
   settingsAutomationEnabled.addEventListener("change", () => {
     state.settingsDraft.automationEnabled = settingsAutomationEnabled.checked;
   });
@@ -678,6 +681,26 @@ function bindEvents(): void {
     render();
   });
 
+  settingsAutomationMovieSourceButton.addEventListener("click", async () => {
+    const movieSourceDirectory = await window.folderBot.pickOutputDirectory();
+    if (!movieSourceDirectory) {
+      return;
+    }
+
+    state.settingsDraft.automationMovieSourceDirectory = movieSourceDirectory;
+    render();
+  });
+
+  settingsAutomationMovieMirrorButton.addEventListener("click", async () => {
+    const movieMirrorDirectory = await window.folderBot.pickOutputDirectory();
+    if (!movieMirrorDirectory) {
+      return;
+    }
+
+    state.settingsDraft.automationMovieMirrorDirectory = movieMirrorDirectory;
+    render();
+  });
+
   settingsAutomationSource.addEventListener("change", () => {
     state.settingsDraft.automationSourceId = settingsAutomationSource.value as MetadataSourceId;
   });
@@ -687,21 +710,32 @@ function bindEvents(): void {
   });
 
   repairShowFolderButton.addEventListener("click", async () => {
-    await openRepairFolderPicker();
+    const selectedFolders = await window.folderBot.pickOutputDirectories();
+    if (selectedFolders.length === 0) {
+      return;
+    }
+
+    const existing = new Set(state.repairShowFolderPaths);
+    const nextFolders = selectedFolders.filter((folderPath) => !existing.has(folderPath));
+
+    if (nextFolders.length === 0) {
+      state.message = "Those folders are already in the repair list.";
+      render();
+      return;
+    }
+
+    state.repairShowFolderPaths = [...state.repairShowFolderPaths, ...nextFolders];
+    state.message = `Added ${nextFolders.length} repair folder${nextFolders.length === 1 ? "" : "s"}.`;
+    render();
   });
 
   repairShowRunButton.addEventListener("click", async () => {
     await runRepairSeasonPlacement();
   });
 
-  repairFolderPickerApplyButton.addEventListener("click", () => {
-    state.repairShowFolderPaths = Array.from(repairFolderPickerSelect.selectedOptions).map((option) => option.value);
-    state.modal = "settings";
-    render();
-  });
-
-  repairFolderPickerSelect.addEventListener("change", () => {
-    state.repairFolderPickerSelection = Array.from(repairFolderPickerSelect.selectedOptions).map((option) => option.value);
+  repairShowClearButton.addEventListener("click", () => {
+    state.repairShowFolderPaths = [];
+    state.message = "Repair folder list cleared.";
     render();
   });
 
@@ -940,10 +974,27 @@ function bindEvents(): void {
     }
   });
 
-  repairFolderPickerView.addEventListener("click", (event) => {
-    if (event.target === repairFolderPickerView) {
-      closeRepairFolderPicker();
+  repairShowFolderList.addEventListener("click", (event) => {
+    const target = event.target;
+    if (!(target instanceof Element)) {
+      return;
     }
+
+    const button = target.closest<HTMLButtonElement>("[data-remove-repair-folder-index]");
+    const indexValue = button?.dataset.removeRepairFolderIndex;
+    if (!indexValue) {
+      return;
+    }
+
+    const index = Number(indexValue);
+    if (!Number.isInteger(index) || index < 0 || index >= state.repairShowFolderPaths.length) {
+      return;
+    }
+
+    const [removedPath] = state.repairShowFolderPaths.splice(index, 1);
+    state.repairShowFolderPaths = [...state.repairShowFolderPaths];
+    state.message = removedPath ? `Removed repair folder: ${splitPath(removedPath).name}` : "Removed repair folder.";
+    render();
   });
 
   helpView.addEventListener("click", (event) => {
@@ -955,13 +1006,7 @@ function bindEvents(): void {
 
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape" && state.modal !== "none") {
-      if (state.modal === "repair") {
-        state.modal = "history";
-      } else if (state.modal === "repair-folders") {
-        state.modal = "settings";
-      } else {
-        state.modal = "none";
-      }
+      state.modal = state.modal === "repair" ? "history" : "none";
       render();
     }
   });
@@ -1053,7 +1098,6 @@ function render(): void {
   settingsView.classList.toggle("view-hidden", state.modal !== "settings");
   historyView.classList.toggle("view-hidden", state.modal !== "history");
   repairView.classList.toggle("view-hidden", state.modal !== "repair");
-  repairFolderPickerView.classList.toggle("view-hidden", state.modal !== "repair-folders");
   helpView.classList.toggle("view-hidden", state.modal !== "help");
   sourceSelect.value = state.sourceId;
   manualTitleInput.value = state.manualTitle;
@@ -1062,10 +1106,13 @@ function render(): void {
   settingsTvdbApiKey.value = state.settingsDraft.tvdbApiKey;
   settingsTvdbPin.value = state.settingsDraft.tvdbPin;
   settingsLanguage.value = state.settingsDraft.defaultLanguage;
+  settingsLaunchAtLogin.checked = state.settingsDraft.launchAtLogin;
   settingsAutomationEnabled.checked = state.settingsDraft.automationEnabled;
   settingsAutomationInboxDirectory.value = state.settingsDraft.automationInboxDirectory;
   settingsAutomationSourceLibraryDirectory.value = state.settingsDraft.automationSourceLibraryDirectory;
   settingsAutomationMirrorLibraryDirectory.value = state.settingsDraft.automationMirrorLibraryDirectory;
+  settingsAutomationMovieSourceDirectory.value = state.settingsDraft.automationMovieSourceDirectory;
+  settingsAutomationMovieMirrorDirectory.value = state.settingsDraft.automationMovieMirrorDirectory;
   settingsAutomationSource.value = state.settingsDraft.automationSourceId;
   settingsAutomationSettleSeconds.value = String(state.settingsDraft.automationSettleSeconds);
   repairShowFolderInput.value = buildRepairFolderSummary();
@@ -1089,7 +1136,6 @@ function render(): void {
   renderInspector();
   renderHistoryList();
   renderRepairModal();
-  renderRepairFolderPicker();
   renderAutomationStatus();
   renderRepairShowFolderList();
 
@@ -1104,21 +1150,20 @@ function render(): void {
   clearButton.disabled = state.busy;
   historyButton.disabled = state.busy && state.modal === "history";
   historyRepairButton.disabled =
-    state.busy || state.historyTab !== "automation" || state.automationHistorySelection.length === 0;
+    state.busy || state.historyTab !== "automation" || !canRepairSelectedAutomationEntries();
   settingsButton.disabled = state.busy && state.modal === "settings";
   historyBackButton.disabled = state.busy;
   repairBackButton.disabled = state.busy;
   repairProviderSelect.disabled = state.busy;
-  repairFolderPickerSelect.disabled = state.busy;
-  repairFolderPickerBackButton.disabled = state.busy;
-  repairFolderPickerApplyButton.disabled =
-    state.busy || state.repairFolderPickerSelection.length === 0 || state.modal !== "repair-folders";
   settingsBackButton.disabled = state.busy;
   settingsSaveButton.disabled = state.busy;
   settingsAutomationInboxButton.disabled = state.busy;
   settingsAutomationSourceLibraryButton.disabled = state.busy;
   settingsAutomationMirrorLibraryButton.disabled = state.busy;
+  settingsAutomationMovieSourceButton.disabled = state.busy;
+  settingsAutomationMovieMirrorButton.disabled = state.busy;
   repairShowFolderButton.disabled = state.busy;
+  repairShowClearButton.disabled = state.busy || state.repairShowFolderPaths.length === 0;
   repairShowRunButton.disabled = state.busy || state.repairShowFolderPaths.length === 0;
   repairSearchButton.disabled = state.busy || state.repairSearchQuery.trim().length === 0;
   repairApplyButton.disabled = state.busy || !getActiveRepairMatch() || state.automationHistorySelection.length === 0;
@@ -1320,7 +1365,7 @@ function renderAutomationHistoryList(): void {
             </div>
           </div>
           <p class="history-summary">
-            ${escapeHtml(entry.sourceId.toUpperCase())} · ${entry.undoneAt ? "Undone" : "Applied"}
+            ${escapeHtml(entry.mediaKind === "movie" ? "MOVIE" : "EPISODE")} · ${escapeHtml(entry.sourceId.toUpperCase())} · ${entry.undoneAt ? "Undone" : "Applied"}
           </p>
           <div class="history-preview-list">
             <div class="history-preview-item history-preview-item-static ${entry.undoneAt ? "history-preview-item-undone" : ""}">
@@ -1348,26 +1393,6 @@ function renderAutomationHistoryList(): void {
 function renderRepairModal(): void {
   renderRepairSearchList();
   renderRepairDetailCard();
-}
-
-function renderRepairFolderPicker(): void {
-  const libraryRoot = state.settings.automationSourceLibraryDirectory.trim();
-  repairFolderPickerRoot.textContent = libraryRoot
-    ? `Source library: ${libraryRoot}`
-    : "Set and save the automation source library before selecting show folders.";
-
-  if (state.repairFolderCandidates.length === 0) {
-    repairFolderPickerSelect.innerHTML = "";
-    return;
-  }
-
-  repairFolderPickerSelect.innerHTML = state.repairFolderCandidates
-    .map((folderPath) => {
-      const parts = splitPath(folderPath);
-      const isSelected = state.repairFolderPickerSelection.includes(folderPath);
-      return `<option value="${escapeHtml(folderPath)}"${isSelected ? " selected" : ""}>${escapeHtml(parts.name)}</option>`;
-    })
-    .join("");
 }
 
 function renderRepairSearchList(): void {
@@ -1469,7 +1494,12 @@ function buildDetectedLabel(parsed: ParsedMedia): string {
   }
 
   if (parsed.kind === "movie") {
-    return `Movie · ${parsed.year ?? "Year unknown"} · ${toDisplayTitle(parsed.normalizedTitle)}`;
+    const movieDetails = [parsed.sourceTag, ...(parsed.videoTags ?? []), parsed.videoCodecTag, parsed.resolution]
+      .filter(Boolean)
+      .join(" ");
+    return `Movie · ${parsed.year ? `(${parsed.year})` : "Year unknown"} · ${toDisplayTitle(parsed.normalizedTitle)}${
+      movieDetails ? ` · ${movieDetails}` : ""
+    }`;
   }
 
   return `Unclassified · ${toDisplayTitle(parsed.normalizedTitle)}`;
@@ -1583,6 +1613,12 @@ function openAutomationRepairModal(): void {
     return;
   }
 
+  if (!canRepairSelectedAutomationEntries()) {
+    state.message = "Repair is only available for TV episode automation items.";
+    render();
+    return;
+  }
+
   const firstSelectedEntry = state.automationHistoryEntries.find((entry) =>
     state.automationHistorySelection.includes(entry.id)
   );
@@ -1597,41 +1633,6 @@ function openAutomationRepairModal(): void {
 
 function closeRepairModal(): void {
   state.modal = "history";
-  render();
-}
-
-async function openRepairFolderPicker(): Promise<void> {
-  const libraryRoot = state.settings.automationSourceLibraryDirectory.trim();
-  if (!libraryRoot) {
-    state.message = "Save an automation source library first.";
-    render();
-    return;
-  }
-
-  state.busy = true;
-  state.message = "Loading show folders...";
-  render();
-
-  try {
-    state.repairFolderCandidates = await window.folderBot.listRepairDirectories(libraryRoot);
-    state.repairFolderPickerSelection = state.repairShowFolderPaths.filter((folderPath) =>
-      state.repairFolderCandidates.includes(folderPath)
-    );
-    state.modal = "repair-folders";
-    state.message =
-      state.repairFolderCandidates.length > 0
-        ? `Loaded ${state.repairFolderCandidates.length} show folder${state.repairFolderCandidates.length === 1 ? "" : "s"}.`
-        : "No show folders were found in the source library.";
-  } catch (error) {
-    state.message = error instanceof Error ? `Could not load show folders: ${error.message}` : "Could not load show folders.";
-  } finally {
-    state.busy = false;
-    render();
-  }
-}
-
-function closeRepairFolderPicker(): void {
-  state.modal = "settings";
   render();
 }
 
@@ -1650,6 +1651,19 @@ function getActiveRepairMatch(): ProviderSeriesSearchMatch | undefined {
   }
 
   return state.repairSearchResults.find((match, index) => buildRepairMatchKey(match, index) === activeId);
+}
+
+function canRepairSelectedAutomationEntries(): boolean {
+  if (state.automationHistorySelection.length === 0) {
+    return false;
+  }
+
+  return getSelectedAutomationEntries().every((entry) => entry.mediaKind === "episode" && !entry.undoneAt);
+}
+
+function getSelectedAutomationEntries(): AutomationHistoryEntry[] {
+  const selectedIds = new Set(state.automationHistorySelection);
+  return state.automationHistoryEntries.filter((entry) => selectedIds.has(entry.id));
 }
 
 async function runAutomationRepairSearch(): Promise<void> {
@@ -1804,11 +1818,14 @@ function renderRepairShowFolderList(): void {
 
   repairShowFolderList.className = "repair-folder-list";
   repairShowFolderList.innerHTML = state.repairShowFolderPaths
-    .map((folderPath) => {
+    .map((folderPath, index) => {
       const parts = splitPath(folderPath);
       return `
         <div class="repair-folder-item">
-          <strong>${escapeHtml(parts.name)}</strong>
+          <div class="repair-folder-item-top">
+            <strong>${escapeHtml(parts.name)}</strong>
+            <button class="quiet-button" type="button" data-remove-repair-folder-index="${index}">Remove</button>
+          </div>
           <span>${escapeHtml(folderPath)}</span>
         </div>
       `;
@@ -1878,8 +1895,10 @@ function renderAutomationStatus(): void {
     </div>
     <div class="automation-status-summary">
       <p>Inbox: ${escapeHtml(status.inboxDirectory || "No inbox folder selected.")}</p>
-      <p>Source library: ${escapeHtml(status.sourceLibraryDirectory || "No source library selected.")}</p>
-      <p>Mirror library: ${escapeHtml(status.mirrorLibraryDirectory || "No mirror library selected.")}</p>
+      <p>TV source: ${escapeHtml(status.sourceLibraryDirectory || "No TV source library selected.")}</p>
+      <p>TV mirror: ${escapeHtml(status.mirrorLibraryDirectory || "No TV mirror library selected.")}</p>
+      <p>Movie source: ${escapeHtml(status.movieSourceDirectory || "No movie source library selected.")}</p>
+      <p>Movie mirror: ${escapeHtml(status.movieMirrorDirectory || "No movie mirror library selected.")}</p>
     </div>
     <ul class="automation-event-list">
       ${recentEvents}

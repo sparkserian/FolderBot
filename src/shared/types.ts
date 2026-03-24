@@ -11,6 +11,10 @@ export interface ParsedMedia {
   season?: number;
   episode?: number;
   absoluteEpisode?: number;
+  sourceTag?: string;
+  videoTags?: string[];
+  videoCodecTag?: string;
+  resolution?: string;
   confidence: number;
   warnings: string[];
 }
@@ -95,10 +99,13 @@ export interface AppSettings {
   tvdbApiKey: string;
   tvdbPin: string;
   defaultLanguage: string;
+  launchAtLogin: boolean;
   automationEnabled: boolean;
   automationInboxDirectory: string;
   automationSourceLibraryDirectory: string;
   automationMirrorLibraryDirectory: string;
+  automationMovieSourceDirectory: string;
+  automationMovieMirrorDirectory: string;
   automationSourceId: MetadataSourceId;
   automationSettleSeconds: number;
 }
@@ -117,6 +124,8 @@ export interface AutomationStatus {
   inboxDirectory: string;
   sourceLibraryDirectory: string;
   mirrorLibraryDirectory: string;
+  movieSourceDirectory: string;
+  movieMirrorDirectory: string;
   sourceId: MetadataSourceId;
   settleSeconds: number;
   pendingCount: number;
@@ -128,6 +137,7 @@ export interface AutomationHistoryEntry {
   id: string;
   createdAt: string;
   sourceId: MetadataSourceId;
+  mediaKind: Extract<MediaKind, "episode" | "movie">;
   originalInboxPath: string;
   sourceLibraryPath: string;
   mirrorLibraryPath: string;

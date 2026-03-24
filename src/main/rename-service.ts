@@ -128,8 +128,15 @@ function buildTargetName(
 
   if (parsed.kind === "movie") {
     const releaseYear = metadata.year ?? parsed.year;
-    const yearSuffix = releaseYear ? ` (${releaseYear})` : "";
-    return `${displayTitle}${yearSuffix}${extension}`;
+    const movieParts = [
+      releaseYear ? `${displayTitle} (${releaseYear})` : displayTitle,
+      parsed.sourceTag || "",
+      ...(parsed.videoTags ?? []),
+      parsed.videoCodecTag || "",
+      parsed.resolution || ""
+    ].filter(Boolean);
+
+    return `${movieParts.join(" ")}${extension}`;
   }
 
   return `${displayTitle}${extension}`;

@@ -10,6 +10,7 @@ import type {
   AutomationRepairResult,
   AutomationEvent,
   AutomationHistoryEntry,
+  MediaKind,
   RepairShowLocationResult,
   RepairShowResult,
   AutomationStatus,
@@ -78,6 +79,8 @@ export function getAutomationStatus(): AutomationStatus {
     inboxDirectory: currentSettings?.automationInboxDirectory ?? "",
     sourceLibraryDirectory: currentSettings?.automationSourceLibraryDirectory ?? "",
     mirrorLibraryDirectory: currentSettings?.automationMirrorLibraryDirectory ?? "",
+    movieSourceDirectory: currentSettings?.automationMovieSourceDirectory ?? "",
+    movieMirrorDirectory: currentSettings?.automationMovieMirrorDirectory ?? "",
     sourceId: currentSettings?.automationSourceId ?? "tvdb",
     settleSeconds: currentSettings?.automationSettleSeconds ?? 45,
     pendingCount: Array.from(candidates.values()).filter((entry) => !entry.processing).length,
@@ -187,6 +190,17 @@ export async function repairAutomationHistoryEntries(
       continue;
     }
 
+    if (entry.mediaKind !== "episode") {
+      results.push({
+        entryId: entry.id,
+        sourcePath: entry.sourceLibraryPath,
+        mirrorPath: entry.mirrorLibraryPath,
+        success: false,
+        error: "Only TV episode automation items can be repaired"
+      });
+      continue;
+    }
+
     try {
       const currentSourcePath = await resolveExistingAutomationPath(entry.sourceLibraryPath, entry.originalInboxPath);
       const currentMirrorPath = await resolveExistingAutomationPath(entry.mirrorLibraryPath);
@@ -221,8 +235,8 @@ export async function repairAutomationHistoryEntries(
         targetFileName
       );
 
-      logFolderCreationEvents("source", sourceResolution);
-      logFolderCreationEvents("mirror", mirrorResolution);
+      logFolderCreationEvents("source", sourceResolution, "show");
+      logFolderCreationEvents("mirror", mirrorResolution, "show");
 
       addEvent(`Repairing automation item to ${metadata.displayTitle}: ${currentName}`);
 
@@ -317,8 +331,7 @@ function isConfigured(): boolean {
   return Boolean(
     settings?.automationEnabled &&
       settings.automationInboxDirectory &&
-      settings.automationSourceLibraryDirectory &&
-      settings.automationMirrorLibraryDirectory
+      hasConfiguredAutomationTargets(settings)
   );
 }
 
@@ -447,17 +460,20 @@ async function processSettledFile(candidate: CandidateEntry): Promise<void> {
     addEvent(`Detected settled file: ${path.basename(candidate.path)}`);
 
     const preview = await buildRenamePreview(candidate.path, settings);
+    const mediaKind = preview.parsed.kind;
+    const targets = resolveAutomationTargets(preview.parsed.kind, settings);
     const renamedPath = await renameInInbox(preview, settings);
     addEvent(`Renamed in inbox: ${path.basename(renamedPath)}`);
 
-    const mirrorTargetPath = await copyToLibraryRoot(renamedPath, preview, settings.automationMirrorLibraryDirectory);
+    const mirrorTargetPath = await copyToLibraryRoot(renamedPath, preview, targets.mirrorRoot, targets.libraryLabel);
     addEvent(`Copied to mirror library: ${mirrorTargetPath}`);
 
-    const sourceTargetPath = await moveToLibraryRoot(renamedPath, preview, settings.automationSourceLibraryDirectory);
+    const sourceTargetPath = await moveToLibraryRoot(renamedPath, preview, targets.sourceRoot, targets.libraryLabel);
     addEvent(`Moved to source library: ${sourceTargetPath}`);
 
     await recordAutomationHistoryEntry({
-      sourceId: settings.automationSourceId,
+      sourceId: preview.metadata?.sourceId ?? (preview.parsed.kind === "movie" ? "local" : settings.automationSourceId),
+      mediaKind,
       originalInboxPath: candidate.path,
       sourceLibraryPath: sourceTargetPath,
       mirrorLibraryPath: mirrorTargetPath,
@@ -474,11 +490,16 @@ async function processSettledFile(candidate: CandidateEntry): Promise<void> {
   }
 }
 
-async function buildRenamePreview(filePath: string, currentSettings: AppSettings): Promise<RenamePreview> {
+async function buildRenamePreview(
+  filePath: string,
+  currentSettings: AppSettings
+): Promise<RenamePreview & { parsed: RenamePreview["parsed"] & { kind: "episode" | "movie" } }> {
+  const parsed = parseMediaName(path.basename(filePath));
+  const sourceId = parsed.kind === "movie" ? "local" : currentSettings.automationSourceId;
   const previews = await previewRenames({
     filePaths: [filePath],
     options: {
-      sourceId: currentSettings.automationSourceId,
+      sourceId,
       tmdbToken: currentSettings.tmdbBearerToken || undefined,
       tvdbApiKey: currentSettings.tvdbApiKey || undefined,
       tvdbPin: currentSettings.tvdbPin || undefined,
@@ -491,15 +512,17 @@ async function buildRenamePreview(filePath: string, currentSettings: AppSettings
     throw new Error("No preview result was generated");
   }
 
-  if (preview.parsed.kind !== "episode") {
-    throw new Error("Automation currently supports TV episodes only");
+  if (preview.parsed.kind !== "episode" && preview.parsed.kind !== "movie") {
+    throw new Error("Automation supports TV episodes and movies only");
   }
 
   if (preview.conflicts.length > 0) {
     throw new Error(preview.conflicts[0]);
   }
 
-  return preview;
+  return preview as RenamePreview & {
+    parsed: RenamePreview["parsed"] & { kind: "episode" | "movie" };
+  };
 }
 
 async function renameInInbox(preview: RenamePreview, currentSettings: AppSettings): Promise<string> {
@@ -519,10 +542,11 @@ async function renameInInbox(preview: RenamePreview, currentSettings: AppSetting
 async function copyToLibraryRoot(
   sourcePath: string,
   preview: RenamePreview,
-  libraryRoot: string
+  libraryRoot: string,
+  libraryLabel: "show" | "movie"
 ): Promise<string> {
   const resolution = await resolveLibraryTargetPath(preview, libraryRoot, path.basename(sourcePath));
-  logFolderCreationEvents("mirror", resolution);
+  logFolderCreationEvents("mirror", resolution, libraryLabel);
 
   if (await pathExists(resolution.targetPath)) {
     addEvent(`Mirror file already exists, skipping copy: ${resolution.targetPath}`);
@@ -537,10 +561,11 @@ async function copyToLibraryRoot(
 async function moveToLibraryRoot(
   sourcePath: string,
   preview: RenamePreview,
-  libraryRoot: string
+  libraryRoot: string,
+  libraryLabel: "show" | "movie"
 ): Promise<string> {
   const resolution = await resolveLibraryTargetPath(preview, libraryRoot, path.basename(sourcePath));
-  logFolderCreationEvents("source", resolution);
+  logFolderCreationEvents("source", resolution, libraryLabel);
   addEvent(`Moving into source library: ${resolution.targetPath}`);
   await moveFile(sourcePath, resolution.targetPath);
   return resolution.targetPath;
@@ -551,6 +576,18 @@ async function resolveLibraryTargetPath(
   libraryRoot: string,
   fileName: string
 ): Promise<ResolvedLibraryTarget> {
+  if (preview.parsed.kind === "movie") {
+    const existed = await pathExists(libraryRoot);
+    await fs.mkdir(libraryRoot, { recursive: true });
+    return {
+      contentDirectory: libraryRoot,
+      contentCreated: !existed,
+      seasonDirectory: null,
+      seasonCreated: false,
+      targetPath: path.join(libraryRoot, fileName)
+    };
+  }
+
   return resolveLibraryTargetPathForPlacement(preview, libraryRoot, fileName);
 }
 
@@ -566,8 +603,8 @@ async function resolveLibraryTargetPathForPlacement(
   const seasonDirectory = await findSeasonDirectory(showDirectory.path, preview);
 
   return {
-    showDirectory: showDirectory.path,
-    showCreated: showDirectory.created,
+    contentDirectory: showDirectory.path,
+    contentCreated: showDirectory.created,
     seasonDirectory: seasonDirectory?.path ?? null,
     seasonCreated: seasonDirectory?.created ?? false,
     targetPath: path.join(seasonDirectory?.path ?? showDirectory.path, fileName)
@@ -763,6 +800,53 @@ function buildRenameOptions(currentSettings: AppSettings, sourceId: RenameOption
   };
 }
 
+function hasConfiguredAutomationTargets(currentSettings: AppSettings): boolean {
+  return hasEpisodeTargets(currentSettings) || hasMovieTargets(currentSettings);
+}
+
+function hasEpisodeTargets(currentSettings: AppSettings): boolean {
+  return Boolean(
+    currentSettings.automationSourceLibraryDirectory && currentSettings.automationMirrorLibraryDirectory
+  );
+}
+
+function hasMovieTargets(currentSettings: AppSettings): boolean {
+  return Boolean(
+    currentSettings.automationMovieSourceDirectory && currentSettings.automationMovieMirrorDirectory
+  );
+}
+
+function resolveAutomationTargets(
+  mediaKind: MediaKind,
+  currentSettings: AppSettings
+): { sourceRoot: string; mirrorRoot: string; libraryLabel: "show" | "movie" } {
+  if (mediaKind === "episode") {
+    if (!hasEpisodeTargets(currentSettings)) {
+      throw new Error("Configure both TV automation library roots before processing episodes");
+    }
+
+    return {
+      sourceRoot: currentSettings.automationSourceLibraryDirectory,
+      mirrorRoot: currentSettings.automationMirrorLibraryDirectory,
+      libraryLabel: "show"
+    };
+  }
+
+  if (mediaKind === "movie") {
+    if (!hasMovieTargets(currentSettings)) {
+      throw new Error("Configure both movie automation library roots before processing movies");
+    }
+
+    return {
+      sourceRoot: currentSettings.automationMovieSourceDirectory,
+      mirrorRoot: currentSettings.automationMovieMirrorDirectory,
+      libraryLabel: "movie"
+    };
+  }
+
+  throw new Error("Automation supports TV episodes and movies only");
+}
+
 function buildEpisodeTargetName(
   currentName: string,
   parsed: ReturnType<typeof parseMediaName>,
@@ -838,10 +922,11 @@ function formatError(error: unknown): string {
 
 function logFolderCreationEvents(
   libraryLabel: "mirror" | "source",
-  resolution: ResolvedLibraryTarget
+  resolution: ResolvedLibraryTarget,
+  contentLabel: "show" | "movie"
 ): void {
-  if (resolution.showCreated) {
-    addEvent(`Created ${libraryLabel} show folder: ${resolution.showDirectory}`);
+  if (resolution.contentCreated) {
+    addEvent(`Created ${libraryLabel} ${contentLabel} folder: ${resolution.contentDirectory}`);
   }
 
   if (resolution.seasonCreated && resolution.seasonDirectory) {
@@ -872,8 +957,8 @@ function getAutomationLogPath(): string {
 
 // Internal representation of where a file should land inside a library root.
 type ResolvedLibraryTarget = {
-  showDirectory: string;
-  showCreated: boolean;
+  contentDirectory: string;
+  contentCreated: boolean;
   seasonDirectory: string | null;
   seasonCreated: boolean;
   targetPath: string;

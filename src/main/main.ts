@@ -1,6 +1,5 @@
 // Electron main-process bootstrap: window creation, menus, native dialogs, and IPC handlers.
-import { app, BrowserWindow, Menu, dialog, ipcMain } from "electron";
-import fs from "node:fs/promises";
+import { app, BrowserWindow, Menu, Tray, dialog, ipcMain, nativeImage } from "electron";
 import path from "node:path";
 import {
   getAutomationStatus,
@@ -24,9 +23,19 @@ import type {
 } from "../shared/types";
 
 let mainWindow: BrowserWindow | null = null;
+let tray: Tray | null = null;
+let isQuitting = false;
+let currentSettings: AppSettings | null = null;
+const LOGIN_BACKGROUND_ARG = "--background";
+const launchedInBackground = process.argv.includes(LOGIN_BACKGROUND_ARG);
+
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
+if (!hasSingleInstanceLock) {
+  app.quit();
+}
 
 // Create the single application window used for the desktop UI.
-function createMainWindow(): void {
+function createMainWindow(showWindow = true): void {
   mainWindow = new BrowserWindow({
     width: 1100,
     height: 760,
@@ -34,6 +43,7 @@ function createMainWindow(): void {
     minHeight: 620,
     backgroundColor: "#202020",
     titleBarStyle: "hiddenInset",
+    show: showWindow,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -48,9 +58,21 @@ function createMainWindow(): void {
     void mainWindow.loadFile(path.join(__dirname, "..", "..", "dist", "renderer", "index.html"));
   }
 
-  if (process.env.ELECTRON_RENDERER_URL) {
+  if (process.env.ELECTRON_RENDERER_URL && showWindow) {
     mainWindow.webContents.openDevTools({ mode: "detach" });
   }
+
+  mainWindow.on("close", (event) => {
+    if (!isQuitting && currentSettings?.launchAtLogin) {
+      event.preventDefault();
+      mainWindow?.hide();
+      ensureTray();
+    }
+  });
+
+  mainWindow.on("closed", () => {
+    mainWindow = null;
+  });
 }
 
 // Build the native application menu and wire Help -> How To back into the renderer.
@@ -106,17 +128,28 @@ function createApplicationMenu(): void {
 // Start Electron, create the main window, and initialize the automation watcher with saved settings.
 app.whenReady().then(async () => {
   createApplicationMenu();
-  createMainWindow();
-  const settings = await getSettings();
-  initializeAutomationService(settings, (status) => {
+  currentSettings = await getSettings();
+  configureLaunchAtLogin(currentSettings);
+  createMainWindow(!launchedInBackground);
+  if (launchedInBackground) {
+    ensureTray();
+  }
+
+  initializeAutomationService(currentSettings, (status) => {
     mainWindow?.webContents.send("automation:status", status);
   });
 
   app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createMainWindow();
-    }
+    showMainWindow();
   });
+});
+
+app.on("second-instance", () => {
+  showMainWindow();
+});
+
+app.on("before-quit", () => {
+  isQuitting = true;
 });
 
 // Standard Electron shutdown behavior: quit on non-macOS once all windows are closed.
@@ -168,15 +201,17 @@ ipcMain.handle("dialog:pick-output-directory", async () => {
   return result.canceled ? null : result.filePaths[0];
 });
 
-// Read the direct child folders under a configured library root for the repair folder picker.
-ipcMain.handle("automation:list-repair-directories", async (_event, rootPath: string) => {
-  const resolvedRoot = path.resolve(rootPath);
-  const entries = await fs.readdir(resolvedRoot, { withFileTypes: true });
+// Native multi-directory picker used by repair so several show folders can be chosen in one browse action.
+ipcMain.handle("dialog:pick-output-directories", async () => {
+  const options = {
+    buttonLabel: "Select folders",
+    properties: ["openDirectory", "multiSelections"]
+  } satisfies Electron.OpenDialogOptions;
 
-  return entries
-    .filter((entry) => entry.isDirectory())
-    .map((entry) => path.join(resolvedRoot, entry.name))
-    .sort((left, right) => left.localeCompare(right));
+  const focusedWindow = mainWindow ?? BrowserWindow.getFocusedWindow();
+  const result = focusedWindow ? await dialog.showOpenDialog(focusedWindow, options) : await dialog.showOpenDialog(options);
+
+  return result.canceled ? [] : result.filePaths;
 });
 
 // The remaining IPC handlers expose app features to the renderer through the preload bridge.
@@ -190,6 +225,8 @@ ipcMain.handle("settings:get", async () => {
 
 ipcMain.handle("settings:save", async (_event, payload: Partial<AppSettings>) => {
   const savedSettings = await saveSettings(payload);
+  currentSettings = savedSettings;
+  configureLaunchAtLogin(savedSettings);
   updateAutomationSettings(savedSettings);
   return savedSettings;
 });
@@ -246,3 +283,82 @@ ipcMain.handle("media:apply-renames", async (_event, payload: ApplyRenameRequest
   });
   return results;
 });
+
+function showMainWindow(): void {
+  if (!mainWindow) {
+    createMainWindow(true);
+    return;
+  }
+
+  if (!mainWindow.isVisible()) {
+    mainWindow.show();
+  }
+
+  if (mainWindow.isMinimized()) {
+    mainWindow.restore();
+  }
+
+  mainWindow.focus();
+}
+
+function configureLaunchAtLogin(settings: AppSettings): void {
+  if (!app.isPackaged) {
+    return;
+  }
+
+  app.setLoginItemSettings({
+    openAtLogin: settings.launchAtLogin,
+    openAsHidden: settings.launchAtLogin,
+    path: process.execPath,
+    args: [LOGIN_BACKGROUND_ARG]
+  });
+
+  if (settings.launchAtLogin) {
+    ensureTray();
+  } else if (!mainWindow || mainWindow.isVisible()) {
+    tray?.destroy();
+    tray = null;
+  }
+}
+
+function ensureTray(): void {
+  if (tray) {
+    return;
+  }
+
+  tray = new Tray(createTrayImage());
+  tray.setToolTip("FolderBot");
+  tray.setContextMenu(
+    Menu.buildFromTemplate([
+      {
+        label: "Open FolderBot",
+        click: () => showMainWindow()
+      },
+      {
+        label: "Quit",
+        click: () => {
+          isQuitting = true;
+          app.quit();
+        }
+      }
+    ])
+  );
+
+  tray.on("click", () => {
+    showMainWindow();
+  });
+}
+
+function createTrayImage() {
+  const svg = `
+    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+      <rect x="1" y="4" width="14" height="10" rx="2" fill="#d9d9d9"/>
+      <path d="M1 6h14" stroke="#1f1f1f" stroke-width="1"/>
+      <path d="M3 2h4l1 2H3z" fill="#d9d9d9"/>
+    </svg>
+  `.trim();
+
+  return nativeImage
+    .createFromDataURL(`data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`)
+    .resize({ width: 16, height: 16 });
+}

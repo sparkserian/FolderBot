@@ -1,6 +1,6 @@
 {
   "name": "folderbot",
-  "version": "1.0.16",
+  "version": "1.0.18",
   "description": "Cross-platform Electron media renamer inspired by FileBot workflows",
   "main": "dist-electron/main/main.js",
   "scripts": {
@@ -49,7 +49,8 @@
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "perMachine": false,
-      "removeDefaultUninstallWelcomePage": true
+      "removeDefaultUninstallWelcomePage": true,
+      "include": "build/installer.nsh"
     },
     "linux": {
       "target": [
