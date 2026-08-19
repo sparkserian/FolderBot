@@ -119,7 +119,7 @@ const SOURCE_LABELS: Record<MetadataSourceId, string> = {
 
 const MEDIA_EXTENSIONS = "mkv · mp4 · avi · mov · m4v · wmv · mpg · srt · ass";
 
-const APP_VERSION = "1.0.22";
+const APP_VERSION = "1.0.23";
 
 const DEFAULT_SETTINGS: AppSettings = {
   tmdbBearerToken: "",
@@ -216,12 +216,13 @@ app.innerHTML = `
       </nav>
 
       <div class="title-bar-status">
-        <span id="watcherChip" class="chip"></span>
+        <button id="watcherChip" class="chip chip-button" type="button" title="Show automation activity"></button>
       </div>
     </header>
 
     <main>
       <section id="workspaceView" class="view workspace-view">
+        <div class="workspace-head">
         <div class="toolbar">
           <label class="field toolbar-field-source">
             <span class="field-label">Metadata source</span>
@@ -254,6 +255,13 @@ app.innerHTML = `
             <button id="matchButton" class="btn btn-secondary" type="button">${icon("magnifyingGlass")}Match</button>
             <button id="applyButton" class="btn btn-primary" type="button">${icon("check")}Rename</button>
           </div>
+        </div>
+
+        <div id="automationStrip" class="automation-strip" hidden>
+          <span id="automationStripState" class="chip"></span>
+          <span id="automationStripMessage" class="automation-strip-message"></span>
+          <button id="automationStripLink" class="btn btn-ghost btn-sm" type="button">${icon("pulse")}Activity</button>
+        </div>
         </div>
 
         <section class="queue">
@@ -637,7 +645,7 @@ const helpView = requireElement<HTMLElement>("#helpView");
 const navItems = Array.from(document.querySelectorAll<HTMLButtonElement>(".nav-item"));
 const settingsTabs = Array.from(document.querySelectorAll<HTMLButtonElement>(".panel-tab"));
 const settingsPanels = Array.from(document.querySelectorAll<HTMLElement>(".panel-section"));
-const watcherChip = requireElement<HTMLSpanElement>("#watcherChip");
+const watcherChip = requireElement<HTMLButtonElement>("#watcherChip");
 
 const sourceSelect = requireElement<HTMLSelectElement>("#sourceSelect");
 const manualTitleInput = requireElement<HTMLInputElement>("#manualTitleInput");
@@ -651,6 +659,10 @@ const applyButton = requireElement<HTMLButtonElement>("#applyButton");
 const queueHead = requireElement<HTMLDivElement>("#queueHead");
 const queueBody = requireElement<HTMLDivElement>("#queueBody");
 const dropOverlay = requireElement<HTMLDivElement>("#dropOverlay");
+const automationStrip = requireElement<HTMLDivElement>("#automationStrip");
+const automationStripState = requireElement<HTMLSpanElement>("#automationStripState");
+const automationStripMessage = requireElement<HTMLSpanElement>("#automationStripMessage");
+const automationStripLink = requireElement<HTMLButtonElement>("#automationStripLink");
 
 const inspectDetected = requireElement<HTMLSpanElement>("#inspectDetected");
 const inspectDetectedPath = requireElement<HTMLSpanElement>("#inspectDetectedPath");
@@ -797,6 +809,13 @@ function bindEvents(): void {
       state.settingsTab = next.dataset.tab as SettingsTab;
       render();
       next.focus();
+    });
+  }
+
+  for (const shortcut of [watcherChip, automationStripLink]) {
+    shortcut.addEventListener("click", () => {
+      state.settingsTab = "activity";
+      setView("settings");
     });
   }
 
@@ -1655,6 +1674,7 @@ function render(): void {
   }
 
   renderWatcherChip();
+  renderAutomationStrip();
   renderToolbar();
   renderQueue();
   renderInspector();
@@ -1672,26 +1692,61 @@ function renderDropOverlay(): void {
 function renderWatcherChip(): void {
   const status = state.automationStatus;
 
+  // The base classes are always reapplied. Dropping chip-button here let the browser's own
+  // button border back in, which drew a white ring around the chip.
   if (!status.enabled) {
-    watcherChip.className = "chip";
+    setChipVariant(watcherChip, "");
     watcherChip.innerHTML = `${icon("robot")}Watcher off`;
     return;
   }
 
   if (status.processing) {
-    watcherChip.className = "chip chip-accent";
+    setChipVariant(watcherChip, "chip-accent");
     watcherChip.innerHTML = `${icon("arrowsClockwise")}Filing ${status.pendingCount || 1}`;
     return;
   }
 
   if (status.watching) {
-    watcherChip.className = "chip chip-success chip-dot";
+    setChipVariant(watcherChip, "chip-success chip-dot");
     watcherChip.textContent = status.pendingCount > 0 ? `Watching · ${status.pendingCount} waiting` : "Watching";
     return;
   }
 
-  watcherChip.className = "chip chip-warning";
+  setChipVariant(watcherChip, "chip-warning");
   watcherChip.innerHTML = `${icon("warningCircle")}Watcher needs folders`;
+}
+
+// Keep the structural chip classes and swap only the state variant.
+function setChipVariant(element: HTMLElement, variant: string): void {
+  const base = element instanceof HTMLButtonElement ? "chip chip-button" : "chip";
+  element.className = variant ? `${base} ${variant}` : base;
+}
+
+// A slim live strip above the queue, so filing is visible from the screen the user works on
+// rather than only under Settings.
+function renderAutomationStrip(): void {
+  const status = state.automationStatus;
+  automationStrip.hidden = !status.enabled;
+
+  if (!status.enabled) {
+    return;
+  }
+
+  if (status.processing) {
+    setChipVariant(automationStripState, "chip-accent");
+    automationStripState.textContent = "Filing";
+  } else if (status.watching) {
+    setChipVariant(automationStripState, "chip-success chip-dot");
+    automationStripState.textContent = status.pendingCount > 0 ? `${status.pendingCount} waiting` : "Watching";
+  } else {
+    setChipVariant(automationStripState, "chip-warning");
+    automationStripState.textContent = "Needs folders";
+  }
+
+  const latestEvent = status.recentEvents[0];
+  automationStripMessage.textContent = latestEvent
+    ? `${formatTime(latestEvent.createdAt)} · ${latestEvent.message}`
+    : "Waiting for something to land in the inbox.";
 }
 
 function renderToolbar(): void {

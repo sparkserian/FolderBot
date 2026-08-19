@@ -1671,3 +1671,41 @@ kbd {
   margin: 0;
   overflow-wrap: anywhere;
 }
+
+/* The toolbar and the live automation strip share one grid row, so hiding the strip cannot
+   collapse the queue into an auto-sized row. */
+.workspace-head {
+  display: grid;
+}
+
+.automation-strip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-sunken);
+}
+
+.automation-strip-message {
+  flex: 1 1 auto;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chip-button {
+  border: 0;
+  cursor: pointer;
+  transition: background var(--duration) var(--ease), color var(--duration) var(--ease);
+}
+
+.chip-button:hover {
+  background: var(--border-strong);
+  color: var(--text);
+}
+
+.chip-success.chip-button:hover {
+  background: rgba(63, 191, 131, 0.24);
+}
