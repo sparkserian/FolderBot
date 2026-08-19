@@ -1133,13 +1133,15 @@ select {
 /* ------------------------------------------------------------------ folder list */
 
 .folder-list {
-  display: grid;
-  gap: 1px;
   max-height: 210px;
   overflow-y: auto;
   background: var(--border);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
+}
+
+.folder-item + .folder-item {
+  border-top: 1px solid var(--border);
 }
 
 .folder-item {
@@ -1223,9 +1225,10 @@ input.history-search {
 .history-list {
   overflow-y: auto;
   padding: 16px;
-  display: grid;
-  gap: 12px;
-  align-content: start;
+}
+
+.history-entry + .history-entry {
+  margin-top: 12px;
 }
 
 .history-entry {
@@ -1318,6 +1321,7 @@ input.history-search {
 .empty {
   display: grid;
   place-content: center;
+  min-height: 220px;
   justify-items: center;
   gap: 6px;
   padding: 56px 24px;
@@ -1708,4 +1712,10 @@ kbd {
 
 .chip-success.chip-button:hover {
   background: rgba(63, 191, 131, 0.24);
+}
+
+/* Buttons placed directly in a settings group should size to their label, not stretch
+   across the whole panel. */
+.group-body > .btn {
+  justify-self: start;
 }
