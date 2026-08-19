@@ -6,6 +6,7 @@ import {
   initializeAutomationService,
   repairAutomationHistoryEntries,
   repairSeasonPlacement,
+  suppressAutomationInboxFile,
   updateAutomationSettings
 } from "./automation-service";
 import { getAutomationHistory, undoAutomationHistoryEntry } from "./automation-history-store";
@@ -13,6 +14,7 @@ import { getRenameHistory, recordRenameHistoryBatch, undoRenameHistoryEntry } fr
 import { searchSeriesMatches } from "./providers";
 import { applyRenames, getProviderStatuses, previewRenames } from "./rename-service";
 import { getSettings, saveSettings } from "./settings-store";
+import { APP_ICON_256, TRAY_ICON_COLOR, TRAY_ICON_TEMPLATE } from "./tray-icon";
 import type {
   AppSettings,
   ApplyRenameRequest,
@@ -27,6 +29,7 @@ let tray: Tray | null = null;
 let isQuitting = false;
 let currentSettings: AppSettings | null = null;
 const LOGIN_BACKGROUND_ARG = "--background";
+const TITLE_BAR_HEIGHT = 44;
 const launchedInBackground = process.argv.includes(LOGIN_BACKGROUND_ARG);
 
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
@@ -37,12 +40,25 @@ if (!hasSingleInstanceLock) {
 // Create the single application window used for the desktop UI.
 function createMainWindow(showWindow = true): void {
   mainWindow = new BrowserWindow({
-    width: 1100,
-    height: 760,
-    minWidth: 900,
-    minHeight: 620,
-    backgroundColor: "#202020",
-    titleBarStyle: "hiddenInset",
+    width: 1180,
+    height: 800,
+    minWidth: 940,
+    minHeight: 640,
+    backgroundColor: "#0F1116",
+    // macOS insets the traffic lights into the custom top bar. Windows and Linux hide the
+    // native frame and overlay the system buttons instead, so the app draws its own bar
+    // without a second title bar stacked above it.
+    titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "hidden",
+    ...(process.platform === "darwin"
+      ? {}
+      : {
+          titleBarOverlay: {
+            color: "#12141A",
+            symbolColor: "#C8CDD8",
+            height: TITLE_BAR_HEIGHT
+          },
+          icon: createAppIconImage()
+        }),
     show: showWindow,
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
@@ -120,6 +136,13 @@ function createApplicationMenu(): void {
       label: app.name,
       submenu: [{ role: "about" }, { type: "separator" }, { role: "services" }, { type: "separator" }, { role: "hide" }, { role: "hideOthers" }, { role: "unhide" }, { type: "separator" }, { role: "quit" }]
     });
+  }
+
+  if (process.platform !== "darwin") {
+    // Windows and Linux draw the window's own title bar, so a native menu strip would sit
+    // on top of it. Help lives in the app's own navigation instead.
+    Menu.setApplicationMenu(null);
+    return;
   }
 
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
@@ -260,7 +283,16 @@ ipcMain.handle("automation-history:list", async () => {
 });
 
 ipcMain.handle("automation-history:undo", async (_event, entryId: string) => {
-  return undoAutomationHistoryEntry(entryId);
+  const result = await undoAutomationHistoryEntry(entryId);
+
+  // A restored file lands back in the watched inbox, so hold it until the user changes it again.
+  for (const action of result.results) {
+    if (action.kind === "move-back" && action.success && action.targetPath) {
+      await suppressAutomationInboxFile(action.targetPath);
+    }
+  }
+
+  return result;
 });
 
 ipcMain.handle("history:list", async () => {
@@ -349,16 +381,40 @@ function ensureTray(): void {
   });
 }
 
-function createTrayImage() {
-  const svg = `
-    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
-      <rect x="1" y="4" width="14" height="10" rx="2" fill="#d9d9d9"/>
-      <path d="M1 6h14" stroke="#1f1f1f" stroke-width="1"/>
-      <path d="M3 2h4l1 2H3z" fill="#d9d9d9"/>
-    </svg>
-  `.trim();
+// Build the tray image from embedded PNGs. SVG data URLs render as an empty slot on
+// Windows because nativeImage has no SVG decoder there, which is why this uses PNG.
+function createTrayImage(): Electron.NativeImage {
+  const artwork = process.platform === "darwin" ? TRAY_ICON_TEMPLATE : TRAY_ICON_COLOR;
+  const image = nativeImage.createFromBuffer(Buffer.from(artwork[16], "base64"), {
+    width: 16,
+    height: 16,
+    scaleFactor: 1
+  });
 
-  return nativeImage
-    .createFromDataURL(`data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`)
-    .resize({ width: 16, height: 16 });
+  // Extra representations keep the icon sharp on scaled displays.
+  for (const [size, scaleFactor] of [
+    [24, 1.5],
+    [32, 2]
+  ] as const) {
+    image.addRepresentation({
+      scaleFactor,
+      width: size,
+      height: size,
+      buffer: Buffer.from(artwork[size], "base64")
+    });
+  }
+
+  if (process.platform === "darwin") {
+    image.setTemplateImage(true);
+  }
+
+  return image;
+}
+
+function createAppIconImage(): Electron.NativeImage {
+  return nativeImage.createFromBuffer(Buffer.from(APP_ICON_256, "base64"), {
+    width: 256,
+    height: 256,
+    scaleFactor: 1
+  });
 }

@@ -1,6 +1,6 @@
 {
   "name": "folderbot",
-  "version": "1.0.18",
+  "version": "1.0.21",
   "description": "Cross-platform Electron media renamer inspired by FileBot workflows",
   "main": "dist-electron/main/main.js",
   "scripts": {
@@ -12,6 +12,8 @@
     "build:renderer": "vite build",
     "build:electron": "tsc -p tsconfig.electron.json",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.electron.json --noEmit",
+    "check:parser": "npm run build:electron && node scripts/check-parser.mjs",
+    "icons": "node scripts/generate-icons.mjs",
     "package": "npm run build && electron-builder",
     "github:repo:init": "node scripts/github-init-repo.mjs",
     "github:release": "node scripts/github-publish-release.mjs"
@@ -37,15 +39,20 @@
       "package.json"
     ],
     "mac": {
-      "category": "public.app-category.utilities"
+      "category": "public.app-category.utilities",
+      "icon": "build/icon.png"
     },
     "win": {
+      "icon": "build/icon.ico",
       "target": [
         "nsis",
         "portable"
       ]
     },
     "nsis": {
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "installerHeaderIcon": "build/icon.ico",
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "perMachine": false,
@@ -53,6 +60,7 @@
       "include": "build/installer.nsh"
     },
     "linux": {
+      "icon": "build/icon.png",
       "target": [
         "AppImage",
         "deb"

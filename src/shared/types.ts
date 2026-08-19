@@ -40,6 +40,8 @@ export interface RenameOptions {
   language: string;
   destinationDirectory?: string;
   manualTitle?: string;
+  // Series the user pinned by hand, keyed by source file path, so lookups skip provider guessing.
+  explicitSeriesMatches?: Record<string, ProviderSeriesSearchMatch>;
 }
 
 // A fully prepared preview row used by the manual rename screen.

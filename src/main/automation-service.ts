@@ -49,6 +49,8 @@ let scanTimer: NodeJS.Timeout | null = null;
 let scanInFlight = false;
 let processingCount = 0;
 const candidates = new Map<string, CandidateEntry>();
+// Files restored to the inbox by an undo, keyed by path and held until their content changes.
+const suppressedInboxCandidates = new Map<string, string>();
 const recentEvents: AutomationEvent[] = [];
 // Log writes are serialized so messages stay ordered in the on-disk automation log.
 let logWriteQueue = Promise.resolve();
@@ -66,6 +68,20 @@ export function initializeAutomationService(
 export function updateAutomationSettings(nextSettings: AppSettings): void {
   settings = nextSettings;
   restartWatcher();
+}
+
+// Prevent the watcher from immediately reprocessing a file that was intentionally restored to the inbox.
+export async function suppressAutomationInboxFile(filePath: string): Promise<void> {
+  const stats = await safeStat(filePath);
+  if (!stats) {
+    return;
+  }
+
+  const resolvedPath = path.resolve(filePath);
+  suppressedInboxCandidates.set(resolvedPath, buildSignature(stats.size, stats.mtimeMs));
+  candidates.delete(resolvedPath);
+  addEvent(`Suppressed inbox reprocessing for ${path.basename(filePath)} until the file changes.`);
+  emitStatus();
 }
 
 // Provide the renderer with a snapshot of the watcher's current status.
@@ -305,6 +321,7 @@ export async function repairAutomationHistoryEntries(
 function restartWatcher(): void {
   stopWatcher();
   candidates.clear();
+  suppressedInboxCandidates.clear();
 
   if (!isConfigured()) {
     emitStatus();
@@ -367,7 +384,20 @@ async function scanInboxDirectory(): Promise<void> {
       const stats = await safeStat(filePath);
       if (!stats) {
         candidates.delete(filePath);
+        suppressedInboxCandidates.delete(filePath);
         continue;
+      }
+
+      const currentSignature = buildSignature(stats.size, stats.mtimeMs);
+      const suppressedSignature = suppressedInboxCandidates.get(filePath);
+
+      if (suppressedSignature) {
+        if (suppressedSignature === currentSignature) {
+          candidates.delete(filePath);
+          continue;
+        }
+
+        suppressedInboxCandidates.delete(filePath);
       }
 
       const candidate = candidates.get(filePath);
@@ -402,7 +432,7 @@ async function scanInboxDirectory(): Promise<void> {
       if (
         candidate.stablePasses >= MIN_STABLE_PASSES &&
         now - candidate.stableSince >= settings.automationSettleSeconds * 1000 &&
-        candidate.lastAttemptSignature !== buildSignature(stats.size, stats.mtimeMs)
+        candidate.lastAttemptSignature !== currentSignature
       ) {
         readyCandidates.push(candidate);
       }

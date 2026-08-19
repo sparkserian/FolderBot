@@ -6,3 +6,6 @@ npm-debug.log*
 *.tsbuildinfo
 .env.local
 .env
+
+# Installer binaries dropped into the project root for inspection
+*.exe

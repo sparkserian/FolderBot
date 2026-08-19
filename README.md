@@ -4,8 +4,9 @@ FolderBot is a cross-platform Electron desktop app for renaming and organizing T
 
 ## Current Features
 
-- Manual batch rename with preview before applying changes
+- Manual batch rename with a side-by-side preview before anything is written
 - Metadata sources: `Local parser`, `TMDb`, and `TheTVDB`
+- Series confirmation grouped by show, so a whole season is one answer
 - Manual rename history with undo for full batches or selected items
 - Automation watcher for both TV episodes and movies
 - Separate automation destinations for:
@@ -14,18 +15,26 @@ FolderBot is a cross-platform Electron desktop app for renaming and organizing T
   - movie source library
   - movie mirror library
 - Launch at login support for installed builds
-- Automation history with undo
+- Automation history with undo and a per-item show fix
 - Existing-show season repair for one or more selected folders
+- Tabbed settings and history, and a tray icon that renders on Windows
 
 ## Media Behavior
 
 ### TV episodes
 
-FolderBot can detect common TV episode patterns such as:
+Season and episode markers are read no matter what separates them. Anything that is not a
+letter or digit counts as a separator, so all of these resolve to the same episode:
 
 - `S01E02`
-- `1x02`
-- `Season 1 Episode 2`
+- `S01 E02`, `S01_E02`, `S01.E02`, `S01-E02`, `S01xE02`
+- `S1E2`, `S01EP02`, `S 01 E 02`
+- `1x02` and `01 x 02`
+- `Season 1 Episode 2` and `Season 01 - Episode 02`
+- `Show S01 05` and multi-episode files such as `S01E01-E02`
+
+Files with an episode number but no season, such as `Show - Ep 5`, are read as absolute
+episode numbers and mapped with provider data.
 
 When provider data is available, episodes can be renamed into a format like:
 
@@ -49,6 +58,11 @@ Examples:
 Blade Runner (1982) WEBRip HDR10 x265 1080p.mkv
 Alien (1979) BluRay x264 1080p.mkv
 ```
+
+Tracker sites and release-group names in front of the title are dropped, so
+`www.SomeTracker.com - The Dark Knight (2008) 1080p.mkv` resolves to `The Dark Knight`.
+When a name holds more than one year, a year in brackets wins, and otherwise the last one
+does, which keeps titles like `Blade Runner 2049 (2017)` intact.
 
 The movie parser currently preserves:
 
@@ -88,6 +102,22 @@ npm install
 npm run dev
 ```
 
+## Development Scripts
+
+Check filename parsing against the regression cases in `scripts/check-parser.mjs`:
+
+```bash
+npm run check:parser
+```
+
+Regenerate the app, installer, and tray icons from `build/icon-glyph.svg`. This needs a local
+Chrome, Chromium, or Edge to rasterize, and writes `build/icon.png`, `build/icon.ico`, and
+`src/main/tray-icon.ts`:
+
+```bash
+npm run icons
+```
+
 ## Build
 
 App build:
@@ -113,6 +143,11 @@ npx electron-builder --mac --arm64
 
 - The installable build uses NSIS and should uninstall through Windows `Add or Remove Programs`
 - The portable `.exe` does not have an uninstall flow; it is removed manually
+- Installing a newer build over an older one keeps settings and history. Both live in the
+  Electron user data folder, which is keyed to the app ID and product name, and neither changes
+  between releases
+- The window draws its own title bar and uses the Windows overlay for the system buttons, so
+  there is no native menu strip
 
 ## GitHub Release Flow
 

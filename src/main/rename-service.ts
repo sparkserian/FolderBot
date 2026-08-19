@@ -10,7 +10,7 @@ import type {
   ResolvedMetadata
 } from "../shared/types";
 import { moveFile, sanitizeWindowsReservedName, targetExistsForRename } from "./file-ops";
-import { createProviders } from "./providers";
+import { createProviders, resolveEpisodeFromSeriesMatch } from "./providers";
 
 const INVALID_FILENAME_CHARS = /[<>:"/\\|?*\u0000-\u001F]/g;
 const PREVIEW_CONCURRENCY = 8;
@@ -31,7 +31,16 @@ export async function previewRenames(request: PreviewRequest): Promise<RenamePre
       const currentDirectory = path.dirname(filePath);
       const parsed = parseMediaName(currentName);
       const effectiveParsed = applyManualTitleOverride(parsed, request.options.manualTitle);
-      const providerResult = await provider.resolve(effectiveParsed, request.options);
+      const explicitSeriesMatch = request.options.explicitSeriesMatches?.[filePath];
+      const useExplicitMatch =
+        effectiveParsed.kind === "episode" &&
+        explicitSeriesMatch &&
+        explicitSeriesMatch.sourceId === request.options.sourceId &&
+        request.options.sourceId !== "local";
+
+      const providerResult = useExplicitMatch
+        ? await resolveEpisodeFromSeriesMatch(effectiveParsed, explicitSeriesMatch, request.options)
+        : await provider.resolve(effectiveParsed, request.options);
       const metadata = providerResult.metadata ?? localFallbackMetadata(effectiveParsed);
       const targetName = buildTargetName(metadata, effectiveParsed, currentName);
       const targetDirectory = request.options.destinationDirectory || currentDirectory;

@@ -19,6 +19,8 @@ import type {
 
 // Only a narrow, typed surface is exposed to the renderer to keep the browser context isolated.
 contextBridge.exposeInMainWorld("folderBot", {
+  // The renderer draws its own title bar, so it needs to know which platform layout to use.
+  platform: process.platform,
   pickFiles: () => ipcRenderer.invoke("dialog:pick-files"),
   pickOutputDirectory: () => ipcRenderer.invoke("dialog:pick-output-directory"),
   pickOutputDirectories: () => ipcRenderer.invoke("dialog:pick-output-directories") as Promise<string[]>,

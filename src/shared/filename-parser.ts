@@ -6,30 +6,48 @@ const MEDIA_NOISE = [
   "1080p",
   "720p",
   "480p",
+  "4k",
   "x264",
   "x265",
   "h264",
   "h265",
   "hevc",
+  "av1",
+  "xvid",
+  "divx",
   "webrip",
   "webdl",
   "web-dl",
+  "web",
   "bluray",
   "brrip",
+  "bdrip",
   "dvdrip",
   "hdrip",
+  "hdtv",
+  "pdtv",
   "remux",
   "proper",
   "repack",
   "extended",
+  "unrated",
   "limited",
+  "internal",
   "hdr",
   "hdr10",
   "hdr10+",
+  "sdr",
   "uhd",
+  "imax",
   "10bit",
   "aac",
+  "ac3",
+  "eac3",
   "ddp",
+  "dts",
+  "truehd",
+  "flac",
+  "opus",
   "atmos",
   "dovi",
   "dv",
@@ -39,29 +57,75 @@ const MEDIA_NOISE = [
   "nf",
   "dsnp",
   "hmax",
+  "atvp",
+  "itunes",
   "yts",
   "rarbg",
   "subs",
   "dubbed"
 ];
 
+// Anything that is not a letter or digit counts as a separator. Release names put spaces,
+// dots, underscores, dashes, brackets, dots, slashes, pipes, and stray punctuation between
+// tokens, so the parser treats them all the same instead of guessing at a fixed list.
+const SEP = "[^A-Za-z0-9]";
+const SEP_OPT = `${SEP}*`;
+const SEP_REQ = `${SEP}+`;
+
+// A title must end in a letter or digit, which keeps a leading "[" from being read as the title.
+const TITLE = "(.*?[A-Za-z0-9])";
+
+// Matches S01E01 and every loose variant: "S01 E01", "S01_E01", "S01.E01", "S01 - E01",
+// "S01xE01", "S01 | E01", "S1E1", "S01EP01", and "Season 1 Episode 2".
+const SEASON_EPISODE = `s(?:eason)?${SEP_OPT}(\\d{1,4})${SEP_OPT}(?:x${SEP_OPT})?e(?:p(?:isode)?)?${SEP_OPT}(\\d{1,3})(?!\\d)`;
+
+// Season marker followed by a bare episode number, as in "Show S01 05 Title".
+const SEASON_BARE_EPISODE = `s(?:eason)?${SEP_OPT}(\\d{1,4})${SEP_REQ}(\\d{1,3})(?!\\d)`;
+
+// Trailing part numbers of a multi-episode file: "E01E02", "E01-E02", "E01-02", "E01 & E02".
+const EXTRA_EPISODES = `(?:${SEP_OPT}e\\d{1,3}|${SEP_OPT}[-&+]${SEP_OPT}\\d{1,3}(?![\\da-z]))*`;
+
+// Matches the 1x02 style, including "01 x 02".
+const CROSS_EPISODE = `(\\d{1,2})${SEP_OPT}x${SEP_OPT}(\\d{1,3})(?!\\d)`;
+
+// Episode markers with no season, such as "Ep 5", "Episode 12", or "E07".
+const EPISODE_ONLY = `(?:ep(?:isode)?${SEP_OPT}(\\d{1,3})|e(\\d{2,3}))(?!\\d)`;
+
 const EPISODE_PATTERNS = [
-  /^(.*?)[\s._-]+s(\d{1,2})e(\d{1,2})(?:e\d{1,2})?(.*)$/i,
-  /^(.*?)[\s._-]+(\d{1,2})x(\d{1,2})(.*)$/i,
-  /^(.*?)[\s._-]+season[\s._-]*(\d{1,2})[\s._-]+episode[\s._-]*(\d{1,2})(.*)$/i
+  buildRegExp(`^${TITLE}${SEP_REQ}${SEASON_EPISODE}${EXTRA_EPISODES}(.*)$`),
+  buildRegExp(`^${TITLE}${SEP_REQ}${CROSS_EPISODE}(.*)$`),
+  buildRegExp(`^${TITLE}${SEP_REQ}${SEASON_BARE_EPISODE}(.*)$`)
 ];
 
 const TITLELESS_EPISODE_PATTERNS = [
-  /^s(\d{1,2})e(\d{1,2})(?:e\d{1,2})?[\s._-]*(.*)$/i,
-  /^(\d{1,2})x(\d{1,2})[\s._-]*(.*)$/i,
-  /^season[\s._-]*(\d{1,2})[\s._-]+episode[\s._-]*(\d{1,2})[\s._-]*(.*)$/i
+  buildRegExp(`^${SEP_OPT}${SEASON_EPISODE}${EXTRA_EPISODES}${SEP_OPT}(.*)$`),
+  buildRegExp(`^${SEP_OPT}${CROSS_EPISODE}${SEP_OPT}(.*)$`)
 ];
+
+const EPISODE_ONLY_PATTERN = buildRegExp(`^${TITLE}${SEP_REQ}${EPISODE_ONLY}(.*)$`);
 
 const ABSOLUTE_EPISODE_PATTERN =
   /^(?:\[[^\]]+\][\s._-]*)?(.*?)[\s._-]+-\s*(\d{1,3})(?:\D.*)?$/i;
 
-const MOVIE_PATTERN =
-  /^(.*?)[\s._(\[]((?:19|20)\d{2})(?:[)\]\s._-]|$)(.*)$/i;
+// Last-resort TV form where season and episode are fused into three digits, as in "Show 102".
+const COMBINED_EPISODE_PATTERN = buildRegExp(`^(.*?)${SEP_REQ}([1-9])(\\d{2})(?![\\da-z])(.*)$`);
+
+// A standalone four-digit year, wherever it sits in the name.
+const YEAR_PATTERN = /(?<![A-Za-z0-9])((?:19|20)\d{2})(?![0-9])/g;
+
+// Bracketed text that carries real information, so the prefix stripper leaves it alone.
+const MEDIA_MARKER_PATTERN = /s\s*\d{1,4}\s*[-_.\s]*e\s*\d{1,3}|\d{1,2}\s*x\s*\d{1,3}|episode|(?:19|20)\d{2}/i;
+
+// Site and release-group fluff that gets stapled to the front of a release name.
+const RELEASE_PREFIX_PATTERNS: RegExp[] = [
+  // www.anything, with or without a trailing dash
+  /^www\.\S+[\s._-]*(?:[-–—][\s._-]*)?/i,
+  // site.tld followed by a dash, the usual "SomeSite.com - Title" shape
+  /^\S*\.(?:com|net|org|info|biz|me|tv|mx|to|cc|xyz|pw|ms|is|in|it|se|la|ag|co|uk|ru|eu|link|site|club|life|party|space|team|top|win|ws|nu|sx|tw|ph|id|vc|gs|st|onl|online|store|pro|live|fun|icu|cyou|lol|wiki|art)\b\s*[-–—]+\s*/i,
+  // bare release-group names used as a prefix
+  /^(?:yts|yify|rarbg|eztv|ettv|tgx|torrentgalaxy|1337x|galaxyrg|megusta|psa|qxr|tigole|shaanig|ganool|anoxmous|nogrp|successfulcrab|edith|elite)\b[\s._-]*(?:[-–—][\s._-]*)?/i
+];
+
 
 const MOVIE_SOURCE_PATTERNS = [
   { pattern: /\bremux\b/i, label: "Remux" },
@@ -85,7 +149,8 @@ const MOVIE_CODEC_PATTERNS = [
 // Parse a raw filename into the structured media shape the rest of the app uses.
 export function parseMediaName(fileName: string): ParsedMedia {
   const nameWithoutExtension = fileName.replace(/\.[^/.]+$/, "");
-  const normalizedInput = normalizeSeparators(nameWithoutExtension);
+  const strippedInput = stripReleasePrefixes(nameWithoutExtension);
+  const normalizedInput = normalizeSeparators(strippedInput);
 
   for (const pattern of EPISODE_PATTERNS) {
     const match = normalizedInput.match(pattern);
@@ -148,21 +213,51 @@ export function parseMediaName(fileName: string): ParsedMedia {
     };
   }
 
-  const movieMatch = normalizedInput.match(MOVIE_PATTERN);
-  if (movieMatch) {
-    const title = cleanupTitle(movieMatch[1]);
-    const movieDetails = extractMovieDetails(movieMatch[3] || "");
+  const releaseYear = selectReleaseYear(strippedInput);
+  if (releaseYear) {
+    const title = cleanupTitle(normalizeSeparators(strippedInput.slice(0, releaseYear.index)));
+    const movieDetails = extractMovieDetails(strippedInput.slice(releaseYear.index + 4));
     return {
       kind: "movie",
       originalTitle: fileName,
       normalizedTitle: title || "Unknown Movie",
-      year: Number.parseInt(movieMatch[2], 10),
+      year: releaseYear.year,
       sourceTag: movieDetails.sourceTag,
       videoTags: movieDetails.videoTags,
       videoCodecTag: movieDetails.videoCodecTag,
       resolution: movieDetails.resolution,
       confidence: 0.86,
       warnings: title ? [] : ["Could not confidently extract a movie title."]
+    };
+  }
+
+  const episodeOnlyMatch = normalizedInput.match(EPISODE_ONLY_PATTERN);
+  if (episodeOnlyMatch) {
+    const title = cleanupTitle(episodeOnlyMatch[1]);
+    const absoluteEpisode = Number.parseInt(episodeOnlyMatch[2] ?? episodeOnlyMatch[3], 10);
+    return {
+      kind: "episode",
+      originalTitle: fileName,
+      normalizedTitle: title || "Unknown Series",
+      absoluteEpisode,
+      confidence: 0.62,
+      warnings: ["Found an episode number without a season. Season mapping may require metadata."]
+    };
+  }
+
+  const combinedMatch = normalizedInput.match(COMBINED_EPISODE_PATTERN);
+  const combinedTitle = combinedMatch ? cleanupTitle(combinedMatch[1]) : "";
+  if (combinedMatch && combinedTitle) {
+    return {
+      kind: "episode",
+      originalTitle: fileName,
+      normalizedTitle: combinedTitle,
+      season: Number.parseInt(combinedMatch[2], 10),
+      episode: Number.parseInt(combinedMatch[3], 10),
+      confidence: 0.55,
+      warnings: [
+        "Read the three-digit number as a season and episode. Check the result before renaming."
+      ]
     };
   }
 
@@ -208,6 +303,71 @@ export function toDisplayTitle(value: string): string {
     .join(" ");
 }
 
+function buildRegExp(source: string): RegExp {
+  return new RegExp(source, "i");
+}
+
+// Drop tracker sites, release-group tags, and other fluff pinned to the front of a name.
+// Bracketed text that holds season, episode, or year information is kept.
+function stripReleasePrefixes(value: string): string {
+  let result = value.trim();
+
+  for (let pass = 0; pass < 4; pass += 1) {
+    const previous = result;
+    const bracketMatch = result.match(/^[[({]([^\])}]*)[\])}][\s._-]*/);
+
+    if (bracketMatch && !MEDIA_MARKER_PATTERN.test(bracketMatch[1])) {
+      result = result.slice(bracketMatch[0].length);
+    }
+
+    for (const pattern of RELEASE_PREFIX_PATTERNS) {
+      result = result.replace(pattern, "");
+    }
+
+    result = result.replace(/^[\s._\-–—|]+/, "").trim();
+
+    if (!result || result === previous) {
+      break;
+    }
+  }
+
+  return result || value.trim();
+}
+
+// Pick which four-digit year in a name is the release year. A year inside brackets wins,
+// because that is the convention. Otherwise the last year wins, so titles that contain a
+// number of their own ("Blade Runner 2049 2017") keep the number as part of the title.
+function selectReleaseYear(value: string): { year: number; index: number } | null {
+  const candidates: { year: number; index: number; wrapped: boolean }[] = [];
+  const pattern = new RegExp(YEAR_PATTERN.source, "g");
+  let match: RegExpExecArray | null;
+
+  while ((match = pattern.exec(value)) !== null) {
+    const before = value[match.index - 1];
+    const after = value[match.index + 4];
+    candidates.push({
+      year: Number.parseInt(match[1], 10),
+      index: match.index,
+      wrapped: (before === "(" && after === ")") || (before === "[" && after === "]")
+    });
+  }
+
+  if (candidates.length === 0) {
+    return null;
+  }
+
+  const wrapped = candidates.filter((candidate) => candidate.wrapped);
+  const pool = wrapped.length > 0 ? wrapped : candidates;
+
+  for (let index = pool.length - 1; index >= 0; index -= 1) {
+    if (cleanupTitle(normalizeSeparators(value.slice(0, pool[index].index)))) {
+      return pool[index];
+    }
+  }
+
+  return pool[pool.length - 1];
+}
+
 // Collapse the most common release separators before attempting regex matches.
 function normalizeSeparators(value: string): string {
   return value.replace(/[._]+/g, " ").replace(/\s+/g, " ").trim();
@@ -222,6 +382,8 @@ function cleanupTitle(value: string): string {
       .replace(/\[[^\]]+\]/g, " ")
       .replace(/\([^)]*\)/g, " ")
       .replace(noisePattern, " ")
+      // Slicing a title off in front of a year can leave a dangling bracket behind.
+      .replace(/[[\](){}<>]/g, " ")
       .replace(/[-]+/g, " ")
       .replace(/\s+/g, " ")
       .trim()
