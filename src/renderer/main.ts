@@ -99,6 +99,8 @@ interface AppState {
   repairShowFolderPaths: string[];
   historyEntries: RenameHistoryEntry[];
   automationHistoryEntries: AutomationHistoryEntry[];
+  historyLoadFailed: boolean;
+  automationHistoryLoadFailed: boolean;
   historySelection: Record<string, string[]>;
   automationHistorySelection: string[];
   explicitSeriesMatches: Record<string, ProviderSeriesSearchMatch>;
@@ -168,6 +170,8 @@ const state: AppState = {
   repairShowFolderPaths: [],
   historyEntries: [],
   automationHistoryEntries: [],
+  historyLoadFailed: false,
+  automationHistoryLoadFailed: false,
   historySelection: {},
   automationHistorySelection: [],
   explicitSeriesMatches: {},
@@ -717,24 +721,54 @@ render();
 void initialize();
 
 // Pull initial settings, history, and automation status from the preload bridge.
+//
+// Every step is isolated. This used to be one straight run of awaits, so a single failure -
+// a damaged history file was enough - stopped the rest of startup: the automation status
+// listener below was never registered, which froze the watcher chip and the event feed, and
+// both History lists stayed empty with nothing on screen to say why.
 async function initialize(): Promise<void> {
-  state.settings = await window.folderBot.getSettings();
-  state.settingsDraft = { ...state.settings };
-  state.automationStatus = await window.folderBot.getAutomationStatus();
-  await loadHistory();
-  await refreshProviderStatuses();
-
   window.folderBot.onOpenHelp(() => {
     state.view = "help";
     render();
   });
 
   window.folderBot.onAutomationStatus((status) => {
+    const wasProcessing = state.automationStatus.processing;
     state.automationStatus = status;
     render();
+
+    // A file just finished filing, so its History record exists now. Without this the list only
+    // caught up on a manual Refresh.
+    if (wasProcessing && !status.processing) {
+      void loadHistory();
+    }
   });
 
+  await runStep("Could not read your settings", async () => {
+    state.settings = await window.folderBot.getSettings();
+    state.settingsDraft = { ...state.settings };
+  });
+
+  await runStep("Could not read the watcher status", async () => {
+    state.automationStatus = await window.folderBot.getAutomationStatus();
+  });
+
+  await loadHistory();
+  await runStep("Could not check your metadata providers", refreshProviderStatuses);
+
   render();
+}
+
+// Run one startup step, reporting a failure to the user instead of abandoning the rest.
+async function runStep(failureMessage: string, step: () => Promise<void>): Promise<boolean> {
+  try {
+    await step();
+    return true;
+  } catch (error) {
+    console.error(failureMessage, error);
+    setMessage(error instanceof Error ? `${failureMessage}: ${error.message}` : `${failureMessage}.`, "error");
+    return false;
+  }
 }
 
 // Register all DOM event handlers in one place so state transitions are easier to follow.
@@ -1577,10 +1611,19 @@ async function applyAutomationRepair(match: ProviderSeriesSearchMatch): Promise<
   }
 }
 
-// Reload both history views from disk after any rename, undo, or repair action.
+// Reload both history views from disk after any rename, undo, or repair action. The two lists
+// are read independently so a problem with one still leaves the other on screen.
 async function loadHistory(): Promise<void> {
-  state.historyEntries = await window.folderBot.getRenameHistory();
-  state.automationHistoryEntries = await window.folderBot.getAutomationHistory();
+  const manualLoaded = await runStep("Could not read your rename history", async () => {
+    state.historyEntries = await window.folderBot.getRenameHistory();
+  });
+
+  const automationLoaded = await runStep("Could not read your automation history", async () => {
+    state.automationHistoryEntries = await window.folderBot.getAutomationHistory();
+  });
+
+  state.historyLoadFailed = !manualLoaded;
+  state.automationHistoryLoadFailed = !automationLoaded;
 
   state.historySelection = Object.fromEntries(
     state.historyEntries.map((entry) => [
@@ -1782,6 +1825,14 @@ function renderManualHistory(query: string): string {
   );
 
   if (entries.length === 0) {
+    if (state.historyLoadFailed) {
+      return emptyState(
+        "warningCircle",
+        "Could not read your rename history",
+        "The saved history file could not be opened. Use Refresh to try again."
+      );
+    }
+
     return emptyState(
       "clockCounterClockwise",
       state.historyEntries.length === 0 ? "No renames yet" : "No matching batches",
@@ -1842,6 +1893,14 @@ function renderAutomationHistory(query: string): string {
   );
 
   if (entries.length === 0) {
+    if (state.automationHistoryLoadFailed) {
+      return emptyState(
+        "warningCircle",
+        "Could not read your automation history",
+        "The saved history file could not be opened. Use Refresh to try again."
+      );
+    }
+
     return emptyState(
       "robot",
       state.automationHistoryEntries.length === 0 ? "The watcher has not filed anything yet" : "No matching items",

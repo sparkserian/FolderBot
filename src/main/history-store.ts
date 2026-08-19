@@ -1,5 +1,4 @@
 // Manual rename history storage and undo behavior.
-import { promises as fs } from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { app } from "electron";
@@ -12,20 +11,16 @@ import type {
   UndoRenameHistoryResult
 } from "../shared/types";
 import { moveFile } from "./file-ops";
+import { readJsonArrayFile, writeJsonFileAtomic } from "./json-file";
 
-// Load manual rename history from disk.
+// Load manual rename history from disk. A damaged file costs the records it damaged, not the
+// whole feature, so a half-written entry cannot blank the History screen.
 export async function getRenameHistory(): Promise<RenameHistoryEntry[]> {
-  try {
-    const contents = await fs.readFile(getHistoryPath(), "utf8");
-    const parsed = JSON.parse(contents) as RenameHistoryEntry[];
-    return Array.isArray(parsed) ? parsed.map(normalizeHistoryEntry) : [];
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return [];
-    }
+  const parsed = await readJsonArrayFile(getHistoryPath(), "The manual rename history file");
 
-    throw error;
-  }
+  return parsed
+    .map((entry) => normalizeHistoryEntry(entry as Partial<RenameHistoryEntry> | null))
+    .filter((entry): entry is RenameHistoryEntry => entry !== null);
 }
 
 // Persist a batch of successful manual renames for later undo.
@@ -128,19 +123,35 @@ function getHistoryPath(): string {
 
 // Persist the full history array after recording or undoing changes.
 async function writeHistory(history: RenameHistoryEntry[]): Promise<void> {
-  await fs.mkdir(path.dirname(getHistoryPath()), { recursive: true });
-  await fs.writeFile(getHistoryPath(), JSON.stringify(history, null, 2), "utf8");
+  await writeJsonFileAtomic(getHistoryPath(), history);
 }
 
 // Upgrade older saved history records into the current shape expected by the UI.
-function normalizeHistoryEntry(entry: RenameHistoryEntry): RenameHistoryEntry {
-  return {
-    ...entry,
-    items: entry.items.map((item) => ({
+// Anything unusable is dropped rather than thrown, so one bad record stays one bad record.
+function normalizeHistoryEntry(entry: Partial<RenameHistoryEntry> | null): RenameHistoryEntry | null {
+  if (!entry || typeof entry !== "object") {
+    return null;
+  }
+
+  const items = (Array.isArray(entry.items) ? entry.items : [])
+    .filter((item) => item && typeof item.sourcePath === "string" && typeof item.targetPath === "string")
+    .map((item) => ({
       id: item.id || randomUUID(),
       sourcePath: item.sourcePath,
       targetPath: item.targetPath,
       undoneAt: item.undoneAt
-    }))
+    }));
+
+  if (items.length === 0) {
+    return null;
+  }
+
+  return {
+    id: entry.id || randomUUID(),
+    createdAt: entry.createdAt || new Date(0).toISOString(),
+    sourceId: entry.sourceId ?? "local",
+    itemCount: typeof entry.itemCount === "number" ? entry.itemCount : items.length,
+    items,
+    undoneAt: entry.undoneAt
   };
 }

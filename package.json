@@ -1,6 +1,6 @@
 {
   "name": "folderbot",
-  "version": "1.0.22",
+  "version": "1.0.23",
   "description": "Cross-platform Electron media renamer inspired by FileBot workflows",
   "main": "dist-electron/main/main.js",
   "scripts": {
@@ -13,6 +13,9 @@
     "build:electron": "tsc -p tsconfig.electron.json",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.electron.json --noEmit",
     "check:parser": "npm run build:electron && node scripts/check-parser.mjs",
+    "check:storage": "npm run build:electron && node scripts/check-storage.mjs",
+    "check:ui": "npm run build:renderer && node scripts/check-ui.mjs",
+    "check": "npm run typecheck && npm run check:parser && npm run check:storage && npm run check:ui",
     "icons": "node scripts/generate-icons.mjs",
     "package": "npm run build && electron-builder",
     "github:repo:init": "node scripts/github-init-repo.mjs",
@@ -45,8 +48,18 @@
     "win": {
       "icon": "build/icon.ico",
       "target": [
-        "nsis",
-        "portable"
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
       ]
     },
     "nsis": {

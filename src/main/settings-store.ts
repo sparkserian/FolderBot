@@ -1,8 +1,8 @@
 // Persistent settings storage and normalization for provider credentials and automation settings.
-import { promises as fs } from "node:fs";
 import path from "node:path";
 import { app } from "electron";
 import type { AppSettings } from "../shared/types";
+import { readJsonObjectFile, writeJsonFileAtomic } from "./json-file";
 
 const DEFAULT_SETTINGS: AppSettings = {
   tmdbBearerToken: "",
@@ -22,49 +22,36 @@ const DEFAULT_SETTINGS: AppSettings = {
 
 // Load the saved settings file and fill in any missing fields with defaults.
 export async function getSettings(): Promise<AppSettings> {
-  const settingsPath = getSettingsPath();
+  const parsed = ((await readJsonObjectFile(getSettingsPath(), "The settings file")) ??
+    {}) as Partial<AppSettings> & {
+    automationWatchDirectory?: string;
+    automationLibraryDirectory?: string;
+  };
 
-  try {
-    const contents = await fs.readFile(settingsPath, "utf8");
-    const parsed = JSON.parse(contents) as Partial<AppSettings> & {
-      automationWatchDirectory?: string;
-      automationLibraryDirectory?: string;
-    };
-
-    return {
-      tmdbBearerToken: parsed.tmdbBearerToken ?? DEFAULT_SETTINGS.tmdbBearerToken,
-      tvdbApiKey: parsed.tvdbApiKey ?? DEFAULT_SETTINGS.tvdbApiKey,
-      tvdbPin: parsed.tvdbPin ?? DEFAULT_SETTINGS.tvdbPin,
-      defaultLanguage: parsed.defaultLanguage ?? DEFAULT_SETTINGS.defaultLanguage,
-      launchAtLogin: parsed.launchAtLogin ?? DEFAULT_SETTINGS.launchAtLogin,
-      automationEnabled: parsed.automationEnabled ?? DEFAULT_SETTINGS.automationEnabled,
-      automationInboxDirectory:
-        parsed.automationInboxDirectory ??
-        parsed.automationWatchDirectory ??
-        DEFAULT_SETTINGS.automationInboxDirectory,
-      automationSourceLibraryDirectory:
-        parsed.automationSourceLibraryDirectory ??
-        DEFAULT_SETTINGS.automationSourceLibraryDirectory,
-      automationMirrorLibraryDirectory:
-        parsed.automationMirrorLibraryDirectory ??
-        parsed.automationLibraryDirectory ??
-        DEFAULT_SETTINGS.automationMirrorLibraryDirectory,
-      automationMovieSourceDirectory:
-        parsed.automationMovieSourceDirectory ??
-        DEFAULT_SETTINGS.automationMovieSourceDirectory,
-      automationMovieMirrorDirectory:
-        parsed.automationMovieMirrorDirectory ??
-        DEFAULT_SETTINGS.automationMovieMirrorDirectory,
-      automationSourceId: normalizeAutomationSourceId(parsed.automationSourceId),
-      automationSettleSeconds: normalizeAutomationSettleSeconds(parsed.automationSettleSeconds)
-    };
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return DEFAULT_SETTINGS;
-    }
-
-    throw error;
-  }
+  return {
+    tmdbBearerToken: parsed.tmdbBearerToken ?? DEFAULT_SETTINGS.tmdbBearerToken,
+    tvdbApiKey: parsed.tvdbApiKey ?? DEFAULT_SETTINGS.tvdbApiKey,
+    tvdbPin: parsed.tvdbPin ?? DEFAULT_SETTINGS.tvdbPin,
+    defaultLanguage: parsed.defaultLanguage ?? DEFAULT_SETTINGS.defaultLanguage,
+    launchAtLogin: parsed.launchAtLogin ?? DEFAULT_SETTINGS.launchAtLogin,
+    automationEnabled: parsed.automationEnabled ?? DEFAULT_SETTINGS.automationEnabled,
+    automationInboxDirectory:
+      parsed.automationInboxDirectory ??
+      parsed.automationWatchDirectory ??
+      DEFAULT_SETTINGS.automationInboxDirectory,
+    automationSourceLibraryDirectory:
+      parsed.automationSourceLibraryDirectory ?? DEFAULT_SETTINGS.automationSourceLibraryDirectory,
+    automationMirrorLibraryDirectory:
+      parsed.automationMirrorLibraryDirectory ??
+      parsed.automationLibraryDirectory ??
+      DEFAULT_SETTINGS.automationMirrorLibraryDirectory,
+    automationMovieSourceDirectory:
+      parsed.automationMovieSourceDirectory ?? DEFAULT_SETTINGS.automationMovieSourceDirectory,
+    automationMovieMirrorDirectory:
+      parsed.automationMovieMirrorDirectory ?? DEFAULT_SETTINGS.automationMovieMirrorDirectory,
+    automationSourceId: normalizeAutomationSourceId(parsed.automationSourceId),
+    automationSettleSeconds: normalizeAutomationSettleSeconds(parsed.automationSettleSeconds)
+  };
 }
 
 // Merge incoming changes with the stored settings, normalize them, and persist the result.
@@ -74,8 +61,7 @@ export async function saveSettings(input: Partial<AppSettings>): Promise<AppSett
     ...normalizeSettings(input)
   };
 
-  await fs.mkdir(path.dirname(getSettingsPath()), { recursive: true });
-  await fs.writeFile(getSettingsPath(), JSON.stringify(nextSettings, null, 2), "utf8");
+  await writeJsonFileAtomic(getSettingsPath(), nextSettings);
 
   return nextSettings;
 }

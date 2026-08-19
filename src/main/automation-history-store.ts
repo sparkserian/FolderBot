@@ -10,20 +10,16 @@ import type {
   UndoAutomationHistoryResult
 } from "../shared/types";
 import { moveFile } from "./file-ops";
+import { readJsonArrayFile, writeJsonFileAtomic } from "./json-file";
 
-// Load automation history from disk and normalize older entries.
+// Load automation history from disk and normalize older entries. A damaged file costs the
+// records it damaged, not the whole feature.
 export async function getAutomationHistory(): Promise<AutomationHistoryEntry[]> {
-  try {
-    const contents = await fs.readFile(getAutomationHistoryPath(), "utf8");
-    const parsed = JSON.parse(contents) as AutomationHistoryEntry[];
-    return Array.isArray(parsed) ? parsed.map(normalizeEntry) : [];
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-      return [];
-    }
+  const parsed = await readJsonArrayFile(getAutomationHistoryPath(), "The automation history file");
 
-    throw error;
-  }
+  return parsed
+    .map((entry) => normalizeEntry(entry as Partial<AutomationHistoryEntry> | null))
+    .filter((entry): entry is AutomationHistoryEntry => entry !== null);
 }
 
 // Persist the provided automation history array as-is.
@@ -135,21 +131,29 @@ function getAutomationHistoryPath(): string {
 
 // Persist the full automation history file after any change.
 async function writeAutomationHistory(history: AutomationHistoryEntry[]): Promise<void> {
-  await fs.mkdir(path.dirname(getAutomationHistoryPath()), { recursive: true });
-  await fs.writeFile(getAutomationHistoryPath(), JSON.stringify(history, null, 2), "utf8");
+  await writeJsonFileAtomic(getAutomationHistoryPath(), history);
 }
 
 // Upgrade older saved entries into the current format expected by the UI and repair flow.
-function normalizeEntry(entry: AutomationHistoryEntry): AutomationHistoryEntry {
+// An entry without the paths it needs to be undone is dropped rather than thrown.
+function normalizeEntry(entry: Partial<AutomationHistoryEntry> | null): AutomationHistoryEntry | null {
+  if (!entry || typeof entry !== "object") {
+    return null;
+  }
+
+  if (typeof entry.sourceLibraryPath !== "string" || typeof entry.originalInboxPath !== "string") {
+    return null;
+  }
+
   return {
     id: entry.id || randomUUID(),
-    createdAt: entry.createdAt,
-    sourceId: entry.sourceId,
+    createdAt: entry.createdAt || new Date(0).toISOString(),
+    sourceId: entry.sourceId ?? "local",
     mediaKind: entry.mediaKind === "movie" ? "movie" : "episode",
     originalInboxPath: entry.originalInboxPath,
     sourceLibraryPath: entry.sourceLibraryPath,
-    mirrorLibraryPath: entry.mirrorLibraryPath,
-    displayTitle: entry.displayTitle,
+    mirrorLibraryPath: entry.mirrorLibraryPath ?? "",
+    displayTitle: entry.displayTitle || entry.sourceLibraryPath.split(/[\\/]/).pop() || "Untitled",
     undoneAt: entry.undoneAt
   };
 }

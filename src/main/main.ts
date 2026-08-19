@@ -166,7 +166,11 @@ app.whenReady().then(async () => {
   }
 
   initializeAutomationService(currentSettings, (status) => {
-    mainWindow?.webContents.send("automation:status", status);
+    // The watcher keeps running while the window is closed to the tray, so the target can be
+    // gone by the time a status arrives.
+    if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isDestroyed()) {
+      mainWindow.webContents.send("automation:status", status);
+    }
   });
 
   app.on("activate", () => {
