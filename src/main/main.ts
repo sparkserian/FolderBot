@@ -86,6 +86,13 @@ function createMainWindow(showWindow = true): void {
     }
   });
 
+  // Windows raises this on shutdown, restart, or log off. Without it the tray-resident window
+  // keeps refusing to close and holds up the whole session.
+  mainWindow.on("session-end", () => {
+    isQuitting = true;
+    app.exit(0);
+  });
+
   mainWindow.on("closed", () => {
     mainWindow = null;
   });

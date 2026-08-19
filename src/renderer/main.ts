@@ -117,7 +117,7 @@ const SOURCE_LABELS: Record<MetadataSourceId, string> = {
 
 const MEDIA_EXTENSIONS = "mkv · mp4 · avi · mov · m4v · wmv · mpg · srt · ass";
 
-const APP_VERSION = "1.0.21";
+const APP_VERSION = "1.0.22";
 
 const DEFAULT_SETTINGS: AppSettings = {
   tmdbBearerToken: "",
