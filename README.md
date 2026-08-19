@@ -146,6 +146,28 @@ npx electron-builder --mac --arm64
 - Installing a newer build over an older one keeps settings and history. Both live in the
   Electron user data folder, which is keyed to the app ID and product name, and neither changes
   between releases
+
+### Upgrading from 1.0.21 or earlier
+
+Those builds shipped an uninstaller whose custom hook ran `nsExec::ExecToLog` without popping
+the return value off the NSIS stack. With FolderBot not running, `taskkill` exits with `128`
+instead of `0`, and the uninstaller exits non-zero.
+
+A new installer runs the old uninstaller to remove the previous version. When that keeps
+failing it reports `FolderBot cannot be closed. Please close it manually and then click Retry`,
+then `Failed to uninstall all the application files`. The wording names the wrong cause: any
+non-zero exit produces it, whether or not the app is running.
+
+The broken uninstaller is the one already on disk, so no new installer can repair it. Clear
+the old install once:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\windows-repair-install.ps1
+```
+
+Add `-WhatIfOnly` to see what it would remove without changing anything. It never touches
+`%APPDATA%\FolderBot`, so credentials and history survive. Upgrades from 1.0.22 onward do not
+need this.
 - The window draws its own title bar and uses the Windows overlay for the system buttons, so
   there is no native menu strip
 
