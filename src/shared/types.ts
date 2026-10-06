@@ -234,6 +234,8 @@ export interface AppInfo {
   userDataPath: string;
   logPath: string;
   packaged: boolean;
+  // The Windows accent colour as #RRGGBB, when the platform reports one.
+  accentColor?: string;
 }
 
 // Persistent record of one completed automation item.

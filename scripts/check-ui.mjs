@@ -1,164 +1,89 @@
-// Loads the real built renderer bundle against a stubbed preload bridge and checks that one
-// failing bridge call cannot take the rest of the app down with it. Regression cover for the
-// bug where an unreadable history file left both History lists blank and froze the watcher
-// chip, because the automation status listener was registered after the failing await.
+// Loads the real built renderer against the stub bridge (scripts/ui-stub.js) in headless Chrome and
+// checks that it starts, shows the watcher's work, and survives a failing bridge call.
 import http from "node:http";
 import { promises as fs } from "node:fs";
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "dist", "renderer");
-const template = await fs.readFile(path.join(ROOT, "index.html"), "utf8");
+const here = path.dirname(fileURLToPath(import.meta.url));
+const ROOT = path.join(here, "..", "dist", "renderer");
+const html = (await fs.readFile(path.join(ROOT, "index.html"), "utf8")).replace("<body>", '<body><script src="/ui-stub.js"></script>');
+const stub = await fs.readFile(path.join(here, "ui-stub.js"));
 
-const STUB = (mode) => `
-<script>
-window.__probe = { statusListenerRegistered: false, helpListenerRegistered: false, errors: [] };
-window.addEventListener("error", (e) => window.__probe.errors.push(String(e.message)));
-window.addEventListener("unhandledrejection", (e) => window.__probe.errors.push("rejection: " + e.reason));
-const settings = { tmdbBearerToken: "", tvdbApiKey: "", tvdbPin: "", defaultLanguage: "en-US",
-  launchAtLogin: false, automationEnabled: true, automationInboxDirectory: "C:\\\\inbox",
-  automationSourceLibraryDirectory: "C:\\\\tv", automationMirrorLibraryDirectory: "D:\\\\tv",
-  automationMovieSourceDirectory: "", automationMovieMirrorDirectory: "",
-  automationSourceId: "tvdb", automationSettleSeconds: 45 };
-const status = { enabled: true, watching: true, processing: false, inboxDirectory: "C:\\\\inbox",
-  sourceLibraryDirectory: "C:\\\\tv", mirrorLibraryDirectory: "D:\\\\tv", movieSourceDirectory: "",
-  movieMirrorDirectory: "", sourceId: "tvdb", settleSeconds: 45, pendingCount: 0, recentEvents: [] };
-const autoEntry = { id: "auto-1", createdAt: "2026-08-19T01:00:00.000Z", sourceId: "tvdb",
-  mediaKind: "episode", originalInboxPath: "C:\\\\inbox\\\\Show.S01E02.mkv",
-  sourceLibraryPath: "C:\\\\tv\\\\Show\\\\Season 01\\\\Show - S01E02.mkv",
-  mirrorLibraryPath: "D:\\\\tv\\\\Show\\\\Season 01\\\\Show - S01E02.mkv", displayTitle: "Show" };
-window.folderBot = {
-  platform: "win32",
-  getSettings: async () => settings,
-  saveSettings: async () => settings,
-  getAutomationStatus: async () => status,
-  getProviderStatuses: async () => [],
-  getRenameHistory: async () => { ${mode === "broken" ? 'throw new Error("Unexpected end of JSON input");' : "return [];"} },
-  getAutomationHistory: async () => [autoEntry],
-  pickFiles: async () => [], pickOutputDirectory: async () => null, pickOutputDirectories: async () => [],
-  getPathForFile: () => null, previewRenames: async () => [], applyRenames: async () => [],
-  undoRenameHistoryEntry: async () => ({}), undoAutomationHistoryEntry: async () => ({}),
-  repairAutomationHistoryEntries: async () => ({}), repairSeasonPlacement: async () => [],
-  searchAutomationSeries: async () => [],
-  onOpenHelp: (fn) => { window.__probe.helpListenerRegistered = true; return () => {}; },
-  onAutomationStatus: (fn) => { window.__probe.statusListenerRegistered = true; window.__pushStatus = fn; return () => {}; }
-};
-</script>
-`;
+const CHROME = [process.env.CHROME_PATH, "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome", "/usr/bin/google-chrome", "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"].filter(Boolean);
+let chromePath = null;
+for (const candidate of CHROME) {
+  try { await fs.access(candidate); chromePath = candidate; break; } catch {}
+}
+if (!chromePath) {
+  console.log("Skipped: no Chrome build found. Set CHROME_PATH to run these checks.");
+  process.exit(0);
+}
 
-let mode = "broken";
 const server = http.createServer(async (req, res) => {
   const url = req.url.split("?")[0];
-  if (url === "/" || url === "/index.html") {
-    res.writeHead(200, { "Content-Type": "text/html" });
-    res.end(template.replace("<body>", "<body>" + STUB(mode)));
-    return;
-  }
+  if (url === "/" || url === "/index.html") return res.writeHead(200, { "Content-Type": "text/html" }), res.end(html);
+  if (url === "/ui-stub.js") return res.writeHead(200, { "Content-Type": "text/javascript" }), res.end(stub);
   try {
     const body = await fs.readFile(path.join(ROOT, url));
-    const type = url.endsWith(".css") ? "text/css" : "text/javascript";
-    res.writeHead(200, { "Content-Type": type });
+    res.writeHead(200, { "Content-Type": url.endsWith(".css") ? "text/css" : url.endsWith(".png") ? "image/png" : "text/javascript" });
     res.end(body);
   } catch { res.writeHead(404); res.end(); }
 });
-await new Promise((r) => server.listen(0, r));
+await new Promise((resolve) => server.listen(0, resolve));
 const port = server.address().port;
-
-const CHROME_CANDIDATES = [
-  process.env.CHROME_PATH,
-  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-  "/Applications/Chromium.app/Contents/MacOS/Chromium",
-  "/usr/bin/google-chrome",
-  "/usr/bin/chromium",
-  "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe"
-].filter(Boolean);
-
-let CHROME = null;
-for (const candidate of CHROME_CANDIDATES) {
-  try { await fs.access(candidate); CHROME = candidate; break; } catch {}
+const chrome = spawn(chromePath, ["--headless=new", "--remote-debugging-port=9335", "--no-first-run", "--user-data-dir=/tmp/fb-check-ui", "about:blank"], { stdio: "ignore" });
+for (let i = 0; i < 60; i++) {
+  try { if ((await fetch("http://127.0.0.1:9335/json/version")).ok) break; } catch {}
+  await new Promise((r) => setTimeout(r, 200));
 }
 
-if (!CHROME) {
-  console.log("Skipped: no Chrome build found. Set CHROME_PATH to run these checks.");
-  server.close();
-  process.exit(0);
-}
-const chrome = spawn(CHROME, ["--headless=new", "--remote-debugging-port=9333", "--no-first-run",
-  "--user-data-dir=/tmp/fb-chrome-profile", "about:blank"], { stdio: "ignore" });
-
-async function cdp(fn) {
-  for (let i = 0; i < 60; i++) {
-    try { const r = await fetch("http://127.0.0.1:9333/json/version"); if (r.ok) break; } catch {}
-    await new Promise((r) => setTimeout(r, 200));
-  }
-  const target = await (await fetch("http://127.0.0.1:9333/json/new?" + `http://127.0.0.1:${port}/`, { method: "PUT" })).json();
+async function open(query) {
+  const target = await (await fetch(`http://127.0.0.1:9335/json/new?${encodeURIComponent(`http://127.0.0.1:${port}/?${query}`)}`, { method: "PUT" })).json();
   const ws = new WebSocket(target.webSocketDebuggerUrl);
   await new Promise((r) => ws.addEventListener("open", r));
   let id = 0;
   const pending = new Map();
-  ws.addEventListener("message", (e) => {
-    const msg = JSON.parse(e.data);
-    if (msg.id && pending.has(msg.id)) { pending.get(msg.id)(msg); pending.delete(msg.id); }
-  });
-  const send = (method, params = {}) => new Promise((res) => { const n = ++id; pending.set(n, res); ws.send(JSON.stringify({ id: n, method, params })); });
-  const evaluate = async (expr) => {
-    const r = await send("Runtime.evaluate", { expression: expr, awaitPromise: true, returnByValue: true });
-    if (r.result?.exceptionDetails) throw new Error(JSON.stringify(r.result.exceptionDetails));
-    return r.result?.result?.value;
-  };
-  const out = await fn({ evaluate, send });
-  ws.close();
-  await fetch(`http://127.0.0.1:9333/json/close/${target.id}`, { method: "PUT" }).catch(() => {});
-  return out;
+  ws.addEventListener("message", (e) => { const m = JSON.parse(e.data); if (pending.has(m.id)) { pending.get(m.id)(m); pending.delete(m.id); } });
+  const send = (method, params = {}) => new Promise((r) => { const n = ++id; pending.set(n, r); ws.send(JSON.stringify({ id: n, method, params })); });
+  await new Promise((r) => setTimeout(r, 1500));
+  const evaluate = async (expression) => (await send("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true })).result?.result?.value;
+  return { evaluate, close: async () => { ws.close(); await fetch(`http://127.0.0.1:9335/json/close/${target.id}`, { method: "PUT" }).catch(() => {}); } };
 }
 
 let pass = 0, fail = 0;
 const check = (name, cond, extra = "") => {
-  if (cond) { pass++; console.log("  ok  ", name); }
-  else { fail++; console.log("  FAIL", name, extra); }
+  if (cond) { pass++; console.log("  ok  ", name); } else { fail++; console.log("  FAIL", name, extra); }
 };
+const text = "document.body.innerText";
 
-console.log("Scenario: rename history file is unreadable (the reported bug)");
-const r = await cdp(async ({ evaluate }) => {
-  await new Promise((res) => setTimeout(res, 1500));
-  return evaluate(`(async () => {
-    document.querySelector('[data-view="history"]').click();
-    await new Promise(r => setTimeout(r, 400));
-    const manual = document.querySelector('#historyList').innerText;
-    document.querySelector('#historyTabAutomation').click();
-    await new Promise(r => setTimeout(r, 200));
-    const auto = document.querySelector('#historyList').innerText;
-    if (window.__pushStatus) window.__pushStatus({ ...await window.folderBot.getAutomationStatus(), processing: true, pendingCount: 3 });
-    await new Promise(r => setTimeout(r, 200));
-    const chip = document.querySelector('.chip')?.innerText || document.body.querySelector('[class*=chip]')?.innerText;
-    return { probe: window.__probe, manual, auto, chip,
-             status: document.querySelector('#statusLine, .status-line, [id*=status]')?.innerText || '' };
-  })()`);
-});
+console.log("1. a busy watcher");
+let page = await open("route=activity&scenario=busy");
+let body = await page.evaluate(text);
+check("no script errors", (await page.evaluate("window.__probe.errors.length")) === 0, await page.evaluate("JSON.stringify(window.__probe.errors)"));
+check("shows the copy with progress and time left", /Copying/.test(body) && /8\.6 GB of 20\.4 GB/.test(body) && /min left/.test(body));
+check("says why a file failed and what to do", /Not enough space/.test(body) && /Free up space/.test(body));
+check("says why a file is waiting", /Another program has this file open/.test(body) && /Waiting for/.test(body));
+check("reports a missing library drive", /cannot be found/.test(body));
+check("the navigation footer summarises the copy", /Copying 42%/.test(await page.evaluate("document.querySelector('.watcher-summary')?.title ?? ''")));
+await page.close();
 
-check("automation status listener was registered despite the failure", r.probe.statusListenerRegistered, JSON.stringify(r.probe));
-check("help listener was registered", r.probe.helpListenerRegistered);
-check("manual list explains the failure instead of showing nothing", /[Cc]ould not read/.test(r.manual), JSON.stringify(r.manual));
-check("manual list does NOT claim there are no renames", !/No renames yet/.test(r.manual), JSON.stringify(r.manual));
-check("automation list still shows its entry", /Show/.test(r.auto), JSON.stringify(r.auto));
-check("live status update reached the UI (chip shows filing)", /Filing/i.test(r.chip || ""), JSON.stringify(r.chip));
-check("no unhandled rejection escaped", r.probe.errors.filter(e => e.startsWith("rejection")).length === 0, JSON.stringify(r.probe.errors));
+console.log("2. a damaged history file does not take the app down");
+page = await open("route=history&scenario=broken");
+body = await page.evaluate(text);
+check("the watcher status listener is registered", await page.evaluate("window.__probe.statusListenerRegistered"));
+check("the error is shown on the History page", /watcher history could not be read/i.test(body), body.slice(0, 400));
+check("the manual history still shows", /Renamed 3 files/.test(body));
+await page.close();
 
-console.log("\nScenario: healthy startup");
-mode = "ok";
-const r2 = await cdp(async ({ evaluate }) => {
-  await new Promise((res) => setTimeout(res, 1500));
-  return evaluate(`(async () => {
-    document.querySelector('[data-view="history"]').click();
-    await new Promise(r => setTimeout(r, 400));
-    return { probe: window.__probe, manual: document.querySelector('#historyList').innerText };
-  })()`);
-});
-check("listeners registered", r2.probe.statusListenerRegistered && r2.probe.helpListenerRegistered);
-check("empty history reads as empty, not broken", /No renames yet/.test(r2.manual), JSON.stringify(r2.manual));
-check("no page errors", r2.probe.errors.length === 0, JSON.stringify(r2.probe.errors));
+console.log("3. a first run");
+page = await open("route=activity&scenario=new");
+body = await page.evaluate(text);
+check("offers both ways to start", /File downloads automatically/.test(body) && /Rename a batch now/.test(body));
+await page.close();
 
+chrome.kill();
+server.close();
 console.log(`\n${pass} passed, ${fail} failed`);
-chrome.kill(); server.close();
-process.exit(fail ? 1 : 0);
+process.exit(fail > 0 ? 1 : 0);

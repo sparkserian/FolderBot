@@ -1,60 +1,50 @@
 // Safe, typed bridge that exposes a narrow Electron API to the renderer.
 import { contextBridge, ipcRenderer, webUtils } from "electron";
-import type {
-  AppSettings,
-  ApplyRenameRequest,
-  AutomationHistoryEntry,
-  AutomationRepairRequest,
-  AutomationRepairResult,
-  AutomationStatus,
-  MetadataSourceId,
-  PreviewRequest,
-  ProviderSeriesSearchMatch,
-  RenameHistoryEntry,
-  RepairShowResult,
-  UndoAutomationHistoryResult,
-  UndoRenameHistoryRequest,
-  UndoRenameHistoryResult
-} from "../shared/types";
+import type { FolderBotApi } from "../shared/api";
 
-// Only a narrow, typed surface is exposed to the renderer to keep the browser context isolated.
-contextBridge.exposeInMainWorld("folderBot", {
+function subscribe<T>(channel: string, listener: (payload: T) => void): () => void {
+  const wrapped = (_event: Electron.IpcRendererEvent, payload: T) => listener(payload);
+  ipcRenderer.on(channel, wrapped);
+  return () => ipcRenderer.off(channel, wrapped);
+}
+
+const api: FolderBotApi = {
   // The renderer draws its own title bar, so it needs to know which platform layout to use.
   platform: process.platform,
   pickFiles: () => ipcRenderer.invoke("dialog:pick-files"),
   pickOutputDirectory: () => ipcRenderer.invoke("dialog:pick-output-directory"),
-  pickOutputDirectories: () => ipcRenderer.invoke("dialog:pick-output-directories") as Promise<string[]>,
-  getPathForFile: (file: Parameters<typeof webUtils.getPathForFile>[0]) => {
-    const path = webUtils.getPathForFile(file);
-    return path || null;
-  },
+  pickOutputDirectories: () => ipcRenderer.invoke("dialog:pick-output-directories"),
+  getPathForFile: (file) => webUtils.getPathForFile(file) || null,
   getSettings: () => ipcRenderer.invoke("settings:get"),
-  saveSettings: (payload: Partial<AppSettings>) => ipcRenderer.invoke("settings:save", payload),
-  getAutomationStatus: () => ipcRenderer.invoke("automation:get-status") as Promise<AutomationStatus>,
-  repairSeasonPlacement: (selectedFolderPaths: string[]) =>
-    ipcRenderer.invoke("automation:repair-show", selectedFolderPaths) as Promise<RepairShowResult[]>,
-  searchAutomationSeries: (payload: { sourceId: MetadataSourceId; query: string }) =>
-    ipcRenderer.invoke("automation:search-series", payload) as Promise<ProviderSeriesSearchMatch[]>,
-  repairAutomationHistoryEntries: (payload: AutomationRepairRequest) =>
-    ipcRenderer.invoke("automation:repair-history", payload) as Promise<AutomationRepairResult>,
-  getAutomationHistory: () => ipcRenderer.invoke("automation-history:list") as Promise<AutomationHistoryEntry[]>,
-  undoAutomationHistoryEntry: (entryId: string) =>
-    ipcRenderer.invoke("automation-history:undo", entryId) as Promise<UndoAutomationHistoryResult>,
-  getRenameHistory: () => ipcRenderer.invoke("history:list") as Promise<RenameHistoryEntry[]>,
-  undoRenameHistoryEntry: (payload: UndoRenameHistoryRequest) =>
-    ipcRenderer.invoke("history:undo", payload) as Promise<UndoRenameHistoryResult>,
-  getProviderStatuses: (options: PreviewRequest["options"]) =>
-    ipcRenderer.invoke("media:get-provider-statuses", options),
-  previewRenames: (payload: PreviewRequest) => ipcRenderer.invoke("media:preview-renames", payload),
-  applyRenames: (payload: ApplyRenameRequest) => ipcRenderer.invoke("media:apply-renames", payload),
-  onOpenHelp: (listener: () => void) => {
-    const wrappedListener = () => listener();
-    ipcRenderer.on("app:open-help", wrappedListener);
-    return () => ipcRenderer.off("app:open-help", wrappedListener);
-  },
-  onAutomationStatus: (listener: (status: AutomationStatus) => void) => {
-    const wrappedListener = (_event: Electron.IpcRendererEvent, status: AutomationStatus) => listener(status);
-    ipcRenderer.on("automation:status", wrappedListener);
-    return () => ipcRenderer.off("automation:status", wrappedListener);
-  }
-});
+  saveSettings: (payload) => ipcRenderer.invoke("settings:save", payload),
+  getAutomationStatus: () => ipcRenderer.invoke("automation:get-status"),
+  setAutomationEnabled: (enabled) => ipcRenderer.invoke("automation:set-enabled", enabled),
+  retryAutomationJob: (jobId) => ipcRenderer.invoke("automation:retry", jobId),
+  skipAutomationJob: (jobId) => ipcRenderer.invoke("automation:skip", jobId),
+  clearFinishedAutomationJobs: () => ipcRenderer.invoke("automation:clear-finished"),
+  repairSeasonPlacement: (paths) => ipcRenderer.invoke("automation:repair-show", paths),
+  searchAutomationSeries: (payload) => ipcRenderer.invoke("automation:search-series", payload),
+  repairAutomationHistoryEntries: (payload) => ipcRenderer.invoke("automation:repair-history", payload),
+  getAutomationHistory: () => ipcRenderer.invoke("automation-history:list"),
+  undoAutomationHistoryEntry: (entryId) => ipcRenderer.invoke("automation-history:undo", entryId),
+  getRenameHistory: () => ipcRenderer.invoke("history:list"),
+  undoRenameHistoryEntry: (payload) => ipcRenderer.invoke("history:undo", payload),
+  getProviderStatuses: (options) => ipcRenderer.invoke("media:get-provider-statuses", options),
+  previewRenames: (payload) => ipcRenderer.invoke("media:preview-renames", payload),
+  applyRenames: (payload) => ipcRenderer.invoke("media:apply-renames", payload),
+  showItemInFolder: (targetPath) => ipcRenderer.invoke("shell:show-item", targetPath),
+  openFolder: (targetPath) => ipcRenderer.invoke("shell:open-folder", targetPath),
+  openLog: () => ipcRenderer.invoke("shell:open-log"),
+  openExternal: (url) => ipcRenderer.invoke("shell:open-external", url),
+  getAppInfo: () => ipcRenderer.invoke("app:info"),
+  getUpdateState: () => ipcRenderer.invoke("update:get-state"),
+  checkForUpdates: () => ipcRenderer.invoke("update:check"),
+  installUpdate: () => ipcRenderer.invoke("update:install"),
+  onAutomationStatus: (listener) => subscribe("automation:status", listener),
+  onUpdateState: (listener) => subscribe("update:state", listener),
+  onSettingsChanged: (listener) => subscribe("settings:changed", listener),
+  onNavigate: (listener) => subscribe("app:navigate", listener),
+  onAccentColor: (listener) => subscribe("app:accent", listener)
+};
+
+contextBridge.exposeInMainWorld("folderBot", api);

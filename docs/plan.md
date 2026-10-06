@@ -21,11 +21,11 @@ rename service, and the history stores. They have check scripts and work.
   left). Copies stream in chunks so a 20 GB file reports progress. Locked or
   failed files say why and can be retried or skipped. Missing or unreachable
   folders and full drives are reported, not swallowed.
-- [ ] 2. Main process. Update service (electron-updater, GitHub provider),
+- [x] 2. Main process. Update service (electron-updater, GitHub provider),
   system notifications when a file is filed or fails, a tray that shows the
   watcher state, single IPC surface for jobs (retry, skip, open folder, open
   log).
-- [ ] 3. Interface rebuild in React. Sidebar: Activity, Rename, History,
+- [x] 3. Interface rebuild in React. Sidebar: Activity, Rename, History,
   Settings. Activity is the live view of the watcher. Rename is drop, match,
   review, rename. History merges manual and automation records in one
   timeline. Settings: General (startup, language, updates), Metadata

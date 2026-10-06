@@ -9,10 +9,13 @@
     ],
     "types": [
       "vite/client"
-    ]
+    ],
+    "jsx": "react-jsx",
+    "moduleResolution": "Bundler"
   },
   "include": [
     "src/renderer/**/*.ts",
+    "src/renderer/**/*.tsx",
     "src/shared/**/*.ts",
     "vite.config.ts"
   ]
