@@ -1673,27 +1673,6 @@ html:not([data-platform="win32"]) .content {
 
 /* ------------------------------------------------------------------ settings */
 
-.jumpbar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin: -8px 0 4px;
-}
-
-.jumpbar button {
-  padding: 4px 10px;
-  border: 0;
-  border-radius: 4px;
-  background: transparent;
-  color: var(--text-2);
-  cursor: default;
-}
-
-.jumpbar button:hover {
-  background: var(--subtle-hover);
-  color: var(--text);
-}
-
 .settings-card {
   background: var(--card);
   border: 1px solid var(--card-stroke);
@@ -1852,5 +1831,108 @@ html:not([data-platform="win32"]) .content {
 
   .row-meta {
     display: none;
+  }
+}
+
+.path-block {
+  padding: 8px 10px;
+  border-radius: 4px;
+  background: var(--card-secondary);
+  border: 1px solid var(--card-stroke);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+
+.dialog-content p strong {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+/* A failed file can offer several ways out; they get their own line under the reason. */
+.job-row.stage-failed .row-actions {
+  grid-column: 2 / -1;
+  justify-content: flex-start;
+  margin-top: 2px;
+}
+
+/* ------------------------------------------------------------------ settings pages */
+
+.settings-layout {
+  display: grid;
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 32px;
+  align-items: start;
+}
+
+.settings-nav {
+  position: sticky;
+  top: 16px;
+  display: grid;
+  gap: 2px;
+}
+
+.settings-tab {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 36px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: default;
+}
+
+.settings-tab:hover {
+  background: var(--subtle-hover);
+}
+
+.settings-tab[aria-selected="true"] {
+  background: var(--subtle-hover);
+  font-weight: 600;
+}
+
+.settings-tab[aria-selected="true"]::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 3px;
+  height: 16px;
+  margin-top: -8px;
+  border-radius: 2px;
+  background: var(--accent-fill);
+}
+
+.settings-tab svg {
+  color: var(--text-2);
+  flex: none;
+}
+
+.settings-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  animation: enter 200ms var(--ease);
+}
+
+.settings-panel > .section:first-child {
+  margin-top: 0;
+}
+
+.settings-panel > .section:first-child > .section-head h2 {
+  font: 600 20px/28px var(--font-display);
+  margin-bottom: 8px;
+}
+
+@media (max-width: 1080px) {
+  .settings-layout {
+    grid-template-columns: 180px minmax(0, 1fr);
+    gap: 20px;
   }
 }

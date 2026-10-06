@@ -42,6 +42,7 @@ import type {
   AutomationStatus,
   PreviewRequest,
   RenameOptions,
+  RetryAutomationOptions,
   SearchSeriesRequest
 } from "../shared/types";
 
@@ -506,7 +507,7 @@ ipcMain.handle("settings:save", async (_event, payload: Partial<AppSettings>) =>
 
 ipcMain.handle("automation:get-status", async () => getAutomationStatus());
 ipcMain.handle("automation:set-enabled", async (_event, enabled: boolean) => setAutomationEnabled(enabled));
-ipcMain.handle("automation:retry", async (_event, jobId: string) => retryAutomationJob(jobId));
+ipcMain.handle("automation:retry", async (_event, jobId: string, options?: RetryAutomationOptions) => retryAutomationJob(jobId, options ?? {}));
 ipcMain.handle("automation:skip", async (_event, jobId: string) => skipAutomationJob(jobId));
 ipcMain.handle("automation:clear-finished", async () => clearFinishedAutomationJobs());
 ipcMain.handle("automation:repair-show", async (_event, selectedFolderPaths: string[]) => repairSeasonPlacement(selectedFolderPaths));

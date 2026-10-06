@@ -163,6 +163,14 @@ export interface AutomationJobError {
   at: string;
   // Transient problems (a busy file, a dropped network) are retried on their own.
   willRetryAt?: string;
+  // The library file that is in the way, when the problem is a name clash.
+  existingPath?: string;
+  // An extra way out the user can choose: replace the library file that is in the way.
+  remedy?: "replace";
+}
+
+export interface RetryAutomationOptions {
+  replaceExisting?: boolean;
 }
 
 export interface AutomationJob {

@@ -43,6 +43,11 @@
       error: { message: "Not enough space for the mirror library: the file needs 2.1 GB and drive F: has 1.4 GB free.", hint: "Free up space on that drive, then press Retry.", code: "ENOSPC", at: iso(300) }
     }),
     job({
+      fileName: "Slow.Horses.S04E01.1080p.WEB.mkv", stage: "failed", stageSince: iso(120), attempts: 1, mediaKind: "episode", title: "Slow Horses",
+      detail: 'The TV source library already has "Slow Horses - S04E01 - Identity Theft.mkv" (in Slow Horses\\Season 04).',
+      error: { message: 'The TV source library already has "Slow Horses - S04E01 - Identity Theft.mkv" (in Slow Horses\\Season 04).', hint: "Replace puts the new file in its place and moves the old one to the Recycle Bin. Skip leaves both alone.", code: "EEXIST", at: iso(120), remedy: "replace", existingPath: "E:\\Media\\TV\\Slow Horses\\Season 04\\Slow Horses - S04E01 - Identity Theft.mkv" }
+    }),
+    job({
       fileName: "Shogun.2024.S01E09.mkv", stage: "locked", stageSince: iso(190), size: 3.4 * GB,
       detail: "Another program has this file open (often the downloader or a virus scan). Filing starts as soon as it lets go. (for 3 min)"
     }),

@@ -12,7 +12,16 @@ const userData = path.join(root, "userData");
 const originalLoad = Module._load;
 Module._load = function (request, parent, isMain) {
   if (request === "electron") {
-    return { app: { getPath: () => userData, isPackaged: false } };
+    return {
+      app: { getPath: () => userData, isPackaged: false },
+      shell: {
+        trashItem: async (target) => {
+          const bin = path.join(root, "recycle-bin");
+          await fs.mkdir(bin, { recursive: true });
+          await fs.rename(target, path.join(bin, path.basename(target)));
+        }
+      }
+    };
   }
   return originalLoad.call(this, request, parent, isMain);
 };
@@ -128,7 +137,23 @@ async function main() {
   await sleep(3500);
   check("the folder is named as a problem", watcher.getAutomationStatus().problems.some((p) => /Other\.Show\.S02E01/.test(p.message)), JSON.stringify(watcher.getAutomationStatus().problems));
 
-  console.log("8. the log file records what happened");
+  console.log("8. a name clash in the library can be replaced");
+  const clashTarget = path.join(tvSource, "Some Show", "Season 01", "Some Show - S01E03.mkv");
+  await fs.mkdir(path.dirname(clashTarget), { recursive: true });
+  await writeFile(clashTarget, 1024);
+  const clash = path.join(inbox, "Some.Show.S01E03.720p.mkv");
+  await writeFile(clash, 2 * 1024 * 1024);
+  await waitFor(() => watcher.getAutomationStatus().jobs.some((job) => job.fileName === path.basename(clash) && job.stage === "failed"), 20_000);
+  const clashJob = watcher.getAutomationStatus().jobs.find((job) => job.fileName === path.basename(clash));
+  check("it fails naming the library and the file", /TV source library already has "Some Show - S01E03\.mkv" \(in Some Show/.test(clashJob?.error?.message ?? ""), clashJob?.error?.message);
+  check("it offers Replace and points at the existing file", clashJob?.error?.remedy === "replace" && clashJob?.error?.existingPath === clashTarget, JSON.stringify(clashJob?.error));
+  await watcher.retryAutomationJob(clashJob.id, { replaceExisting: true });
+  await waitFor(() => watcher.getAutomationStatus().jobs.some((job) => job.fileName === path.basename(clash) && job.stage === "filed"), 20_000);
+  check("Replace files it", watcher.getAutomationStatus().jobs.some((job) => job.fileName === path.basename(clash) && job.stage === "filed"));
+  check("the new file is in place", (await fs.stat(clashTarget)).size === 2 * 1024 * 1024);
+  check("the old file went to the Recycle Bin", await exists(path.join(root, "recycle-bin", "Some Show - S01E03.mkv")));
+
+  console.log("9. the log file records what happened");
   const log = await fs.readFile(path.join(userData, "automation.log"), "utf8").catch(() => "");
   check("the log mentions the filed episode", log.includes("Filed Some.Show.S01E02"), log.slice(-400));
 

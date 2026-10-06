@@ -29,7 +29,7 @@ export async function copyWithProgress(sourcePath: string, targetPath: string, o
   await fs.mkdir(path.dirname(targetPath), { recursive: true });
 
   if (await exists(targetPath)) {
-    throw Object.assign(new Error(`A file with this name is already at ${targetPath}`), { code: "EEXIST" });
+    throw Object.assign(new Error(`A file named "${path.basename(targetPath)}" is already there`), { code: "EEXIST", path: targetPath });
   }
 
   const partialPath = `${targetPath}${PARTIAL_SUFFIX}`;
@@ -65,7 +65,7 @@ export async function moveWithProgress(sourcePath: string, targetPath: string, o
   await fs.mkdir(path.dirname(targetPath), { recursive: true });
 
   if (await exists(targetPath)) {
-    throw Object.assign(new Error(`A file with this name is already at ${targetPath}`), { code: "EEXIST" });
+    throw Object.assign(new Error(`A file named "${path.basename(targetPath)}" is already there`), { code: "EEXIST", path: targetPath });
   }
 
   if (sameVolume(sourcePath, targetPath)) {

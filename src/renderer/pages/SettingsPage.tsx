@@ -22,51 +22,81 @@ import {
   Wrench,
   X
 } from "@phosphor-icons/react";
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import type { AppSettings, RepairShowResult, UpdateState } from "../../shared/types";
 import { Button, PageHeader, PathText, Section, SettingsCard, Switch } from "../components/ui";
 import { fileName, formatRelative, plural } from "../format";
 import { api, describe, saveSettings, setState, toast, useStore } from "../store";
 
-const SECTIONS: Array<[string, string]> = [
-  ["automation", "Automatic filing"],
-  ["notifications", "Notifications"],
-  ["sources", "Metadata sources"],
-  ["startup", "Startup"],
-  ["updates", "Updates"],
-  ["maintenance", "Maintenance"],
-  ["about", "About"]
+type SettingsTab = "automation" | "notifications" | "sources" | "startup" | "updates" | "maintenance" | "about";
+
+const TABS: Array<{ id: SettingsTab; label: string; icon: typeof Tray }> = [
+  { id: "automation", label: "Automatic filing", icon: Tray },
+  { id: "notifications", label: "Notifications", icon: Bell },
+  { id: "sources", label: "Metadata sources", icon: Key },
+  { id: "startup", label: "Startup", icon: Power },
+  { id: "updates", label: "Updates", icon: DownloadSimple },
+  { id: "maintenance", label: "Maintenance", icon: Wrench },
+  { id: "about", label: "About", icon: Info }
 ];
 
+// Each tab is its own page. Other screens can open a tab directly with navigate("settings", tab).
 export function SettingsPage() {
   const settings = useStore((current) => current.settings);
-  const target = useStore((current) => current.settingsSection);
+  const requested = useStore((current) => current.settingsSection);
+  const [tab, setTab] = useState<SettingsTab>(() => (TABS.some((item) => item.id === requested) ? (requested as SettingsTab) : "automation"));
 
   useEffect(() => {
-    if (target) {
-      document.getElementById(`settings-${target}`)?.scrollIntoView({ block: "start" });
+    if (requested && TABS.some((item) => item.id === requested)) {
+      setTab(requested as SettingsTab);
+    }
+    if (requested) {
       setState({ settingsSection: undefined });
     }
-  }, [target]);
+  }, [requested]);
+
+  const onKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    const offset = event.key === "ArrowDown" ? 1 : event.key === "ArrowUp" ? -1 : 0;
+    if (!offset) return;
+    event.preventDefault();
+    const index = TABS.findIndex((item) => item.id === tab);
+    const next = TABS[(index + offset + TABS.length) % TABS.length];
+    setTab(next.id);
+    document.getElementById(`settings-tab-${next.id}`)?.focus();
+  };
 
   return (
     <>
       <PageHeader title="Settings" />
-      <nav className="jumpbar" aria-label="Settings sections">
-        {SECTIONS.map(([id, label]) => (
-          <button key={id} type="button" onClick={() => document.getElementById(`settings-${id}`)?.scrollIntoView({ behavior: "smooth", block: "start" })}>
-            {label}
-          </button>
-        ))}
-      </nav>
-
-      <AutomationSection settings={settings} />
-      <NotificationSection settings={settings} />
-      <SourcesSection settings={settings} />
-      <StartupSection settings={settings} />
-      <UpdatesSection />
-      <MaintenanceSection />
-      <AboutSection />
+      <div className="settings-layout">
+        <div className="settings-nav" role="tablist" aria-orientation="vertical" aria-label="Settings" onKeyDown={onKeyDown}>
+          {TABS.map((item) => (
+            <button
+              key={item.id}
+              id={`settings-tab-${item.id}`}
+              type="button"
+              role="tab"
+              className="settings-tab"
+              aria-selected={tab === item.id}
+              aria-controls="settings-panel"
+              tabIndex={tab === item.id ? 0 : -1}
+              onClick={() => setTab(item.id)}
+            >
+              <item.icon size={18} aria-hidden />
+              {item.label}
+            </button>
+          ))}
+        </div>
+        <div className="settings-panel" id="settings-panel" role="tabpanel" aria-labelledby={`settings-tab-${tab}`} key={tab}>
+          {tab === "automation" ? <AutomationSection settings={settings} /> : null}
+          {tab === "notifications" ? <NotificationSection settings={settings} /> : null}
+          {tab === "sources" ? <SourcesSection settings={settings} /> : null}
+          {tab === "startup" ? <StartupSection settings={settings} /> : null}
+          {tab === "updates" ? <UpdatesSection /> : null}
+          {tab === "maintenance" ? <MaintenanceSection /> : null}
+          {tab === "about" ? <AboutSection /> : null}
+        </div>
+      </div>
     </>
   );
 }

@@ -1,6 +1,6 @@
 {
   "name": "folderbot",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "Names and files TV episodes and movies, by hand or automatically from a watched folder",
   "main": "dist-electron/main/main.js",
   "scripts": {

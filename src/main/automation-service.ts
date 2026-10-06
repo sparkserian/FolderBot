@@ -7,7 +7,7 @@
 // or skipped is shown as exactly that.
 import { promises as fs } from "node:fs";
 import path from "node:path";
-import { app } from "electron";
+import { app, shell } from "electron";
 import { parseMediaName, toDisplayTitle } from "../shared/filename-parser";
 import type {
   AppSettings,
@@ -25,7 +25,8 @@ import type {
   RenamePreview,
   RepairShowLocationResult,
   RepairShowResult,
-  ResolvedMetadata
+  ResolvedMetadata,
+  RetryAutomationOptions
 } from "../shared/types";
 import {
   getAutomationHistory,
@@ -62,6 +63,8 @@ type JobRecord = AutomationJob & {
   retryAt?: number;
   abort?: AbortController;
   stopRequested?: boolean;
+  // Set for one attempt by Replace.
+  replaceExisting?: boolean;
 };
 
 export interface AutomationCallbacks {
@@ -128,7 +131,7 @@ export async function suppressAutomationInboxFile(filePath: string): Promise<voi
 }
 
 // Retry a failed or skipped file now.
-export async function retryAutomationJob(jobId: string): Promise<void> {
+export async function retryAutomationJob(jobId: string, options: RetryAutomationOptions = {}): Promise<void> {
   const job = findJob(jobId);
   if (!job || (job.stage !== "failed" && job.stage !== "skipped")) {
     return;
@@ -147,8 +150,10 @@ export async function retryAutomationJob(jobId: string): Promise<void> {
   job.attempts = 0;
   job.size = stats.size;
   job.mtimeMs = stats.mtimeMs;
-  setStage(job, "queued", "Retrying now.");
-  addEvent(`Retrying ${job.fileName}.`, "info", job.id);
+  job.replaceExisting = Boolean(options.replaceExisting);
+  const how = job.replaceExisting ? " and replacing the file already in the library" : "";
+  setStage(job, "queued", `Retrying now${how}.`);
+  addEvent(`Retrying ${job.fileName}${how}.`, "info", job.id);
   void runWorker();
 }
 
@@ -524,6 +529,24 @@ async function fileJob(job: JobRecord, current: AppSettings): Promise<void> {
     logFolderCreationEvents("mirror", mirror, targets.libraryLabel);
     logFolderCreationEvents("source", source, targets.libraryLabel);
 
+    const replacing = Boolean(job.replaceExisting);
+    job.replaceExisting = false;
+
+    // Replace moves whatever is in the way to the Recycle Bin, in both libraries.
+    if (replacing) {
+      for (const target of [mirror.targetPath, source.targetPath]) {
+        if (await pathExists(target)) {
+          await moveToRecycleBin(target);
+          addEvent(`Moved the existing ${path.basename(target)} to the Recycle Bin to replace it.`, "warning", job.id);
+        }
+      }
+    } else if (await pathExists(source.targetPath)) {
+      throw Object.assign(new Error(`A file named "${path.basename(source.targetPath)}" is already there`), {
+        code: "EEXIST",
+        path: source.targetPath
+      });
+    }
+
     const mirrorExists = await pathExists(mirror.targetPath);
     const sourceNeedsCopy = !sameVolume(job.inboxPath, source.targetPath);
     const stepCount = (mirrorExists ? 0 : 1) + 1;
@@ -594,13 +617,17 @@ async function fileJob(job: JobRecord, current: AppSettings): Promise<void> {
     const retryDelay = described.transient ? RETRY_DELAYS_MS[job.attempts - 1] : undefined;
     const now = Date.now();
 
+    const existingPath = described.code === "EEXIST" ? (error as { path?: string }).path : undefined;
     job.error = {
-      message: described.message,
+      message: existingPath ? describeClash(existingPath, current) : described.message,
       hint: described.hint,
       code: described.code,
       at: new Date(now).toISOString(),
-      willRetryAt: retryDelay ? new Date(now + retryDelay).toISOString() : undefined
+      willRetryAt: retryDelay ? new Date(now + retryDelay).toISOString() : undefined,
+      existingPath,
+      remedy: described.code === "EEXIST" ? "replace" : undefined
     };
+    described.message = job.error.message;
     job.retryAt = retryDelay ? now + retryDelay : undefined;
     const stats = await statFile(job.inboxPath);
     job.heldSignature = stats ? signature(stats.size, stats.mtimeMs) : undefined;
@@ -648,9 +675,37 @@ async function ensureSpace(bytesNeeded: number, targetPath: string, label: strin
       new Error(
         `Not enough space for the ${label}: the file needs ${formatBytes(bytesNeeded)} and ${driveLabel(targetPath)} has ${formatBytes(available)} free.`
       ),
-      { code: "ENOSPC" }
+      { code: "LOW_SPACE" }
     );
   }
+}
+
+async function moveToRecycleBin(target: string): Promise<void> {
+  try {
+    await shell.trashItem(target);
+  } catch {
+    // Network drives often have no Recycle Bin; the user already chose to replace the file.
+    await fs.unlink(target);
+  }
+}
+
+// "The source library already has The Bear - S03E04.mkv (in The Bear\Season 03)."
+function describeClash(existingPath: string, current: AppSettings): string {
+  const roots: Array<[string, string]> = [
+    ["TV source library", current.automationSourceLibraryDirectory],
+    ["TV mirror library", current.automationMirrorLibraryDirectory],
+    ["movie source library", current.automationMovieSourceDirectory],
+    ["movie mirror library", current.automationMovieMirrorDirectory]
+  ];
+  const match = roots.find(([, root]) => root && path.resolve(existingPath).toLowerCase().startsWith(path.resolve(root).toLowerCase()));
+  const name = path.basename(existingPath);
+
+  if (!match) {
+    return `There is already a file named "${name}" where this one should go.`;
+  }
+
+  const relativeFolder = path.relative(match[1], path.dirname(existingPath));
+  return `The ${match[0]} already has "${name}"${relativeFolder ? ` (in ${relativeFolder})` : ""}.`;
 }
 
 async function buildRenamePreview(
@@ -777,11 +832,18 @@ function describeError(error: unknown): { message: string; hint?: string; code?:
   const message = formatError(error);
 
   switch (code) {
+    case "LOW_SPACE":
+      return {
+        code,
+        transient: false,
+        message,
+        hint: "Free up space on that drive, then press Retry."
+      };
     case "ENOSPC":
       return {
         code,
         transient: false,
-        message: message.startsWith("Not enough space") ? message : "The drive ran out of space.",
+        message: "The drive ran out of space while copying. The unfinished copy was removed.",
         hint: "Free up space on that drive, then press Retry."
       };
     case "EEXIST":
@@ -789,7 +851,7 @@ function describeError(error: unknown): { message: string; hint?: string; code?:
         code,
         transient: false,
         message,
-        hint: "Rename or remove one of the two files, then press Retry."
+        hint: "Replace puts the new file in its place and moves the old one to the Recycle Bin. Skip leaves both alone."
       };
     case "EBUSY":
       return { code, transient: true, message: "Another program is using the file.", hint: "Close any program that has it open." };

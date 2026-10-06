@@ -18,14 +18,16 @@ import {
   Play,
   SkipForward,
   Stop,
+  Swap,
   Television,
   WarningOctagon,
   type Icon as PhosphorIcon
 } from "@phosphor-icons/react";
 import { useState } from "react";
 import type { AutomationJob, AutomationStatus } from "../../shared/types";
-import { Button, EmptyState, InfoBar, PageHeader, ProgressBar, Section, Spinner, useNow } from "../components/ui";
+import { Button, Dialog, EmptyState, InfoBar, PageHeader, ProgressBar, Section, Spinner, useNow } from "../components/ui";
 import {
+  fileName,
   formatBytes,
   formatClock,
   formatElapsed,
@@ -275,6 +277,7 @@ const STAGE_ICONS: Record<AutomationJob["stage"], PhosphorIcon> = {
 
 function JobRow({ job, now }: { job: AutomationJob; now: number }) {
   const [busy, setBusy] = useState(false);
+  const [confirmReplace, setConfirmReplace] = useState(false);
   const IconComponent = STAGE_ICONS[job.stage];
   const retryIn = job.error?.willRetryAt ? Math.max(0, Date.parse(job.error.willRetryAt) - now) : null;
 
@@ -308,6 +311,11 @@ function JobRow({ job, now }: { job: AutomationJob; now: number }) {
         </span>
       </div>
       <div className="row-actions">
+        {job.error?.remedy === "replace" && job.stage === "failed" ? (
+          <Button size="small" variant="accent" icon={Swap} disabled={busy} onClick={() => setConfirmReplace(true)}>
+            Replace
+          </Button>
+        ) : null}
         {job.stage === "failed" || job.stage === "skipped" ? (
           <Button size="small" icon={ArrowClockwise} busy={busy} onClick={() => void run(() => api.retryAutomationJob(job.id))}>
             {job.stage === "skipped" ? "File it" : "Retry"}
@@ -318,8 +326,44 @@ function JobRow({ job, now }: { job: AutomationJob; now: number }) {
             Skip
           </Button>
         ) : null}
-        <Button size="small" variant="subtle" icon={FolderOpen} aria-label="Show in folder" title="Show in folder" onClick={() => void api.showItemInFolder(job.inboxPath)} />
+        {job.error?.existingPath ? (
+          <Button size="small" variant="subtle" icon={FolderOpen} title={job.error.existingPath} onClick={() => void api.showItemInFolder(job.error?.existingPath ?? "")}>
+            Show existing
+          </Button>
+        ) : (
+          <Button size="small" variant="subtle" icon={FolderOpen} title="Show this file in File Explorer" onClick={() => void api.showItemInFolder(job.inboxPath)}>
+            Show in folder
+          </Button>
+        )}
       </div>
+
+      <Dialog
+        open={confirmReplace}
+        title="Replace the file in the library?"
+        onClose={() => setConfirmReplace(false)}
+        footer={
+          <>
+            <span className="dialog-footer-spacer" />
+            <Button onClick={() => setConfirmReplace(false)}>Cancel</Button>
+            <Button
+              variant="accent"
+              icon={Swap}
+              onClick={() => {
+                setConfirmReplace(false);
+                void run(() => api.retryAutomationJob(job.id, { replaceExisting: true }));
+              }}
+            >
+              Replace
+            </Button>
+          </>
+        }
+      >
+        <p>
+          The library already has <strong>{fileName(job.error?.existingPath ?? "")}</strong>. FolderBot moves that file to the Recycle Bin
+          (in both the source and mirror libraries) and files <strong>{job.fileName}</strong> in its place.
+        </p>
+        {job.error?.existingPath ? <p className="path-block">{job.error.existingPath}</p> : null}
+      </Dialog>
     </div>
   );
 }

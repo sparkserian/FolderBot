@@ -16,6 +16,7 @@ import type {
   RenamePreview,
   RenameResult,
   RepairShowResult,
+  RetryAutomationOptions,
   UndoAutomationHistoryResult,
   UndoRenameHistoryRequest,
   UndoRenameHistoryResult,
@@ -32,7 +33,7 @@ export interface FolderBotApi {
   saveSettings: (payload: Partial<AppSettings>) => Promise<AppSettings>;
   getAutomationStatus: () => Promise<AutomationStatus>;
   setAutomationEnabled: (enabled: boolean) => Promise<AppSettings>;
-  retryAutomationJob: (jobId: string) => Promise<void>;
+  retryAutomationJob: (jobId: string, options?: RetryAutomationOptions) => Promise<void>;
   skipAutomationJob: (jobId: string) => Promise<void>;
   clearFinishedAutomationJobs: () => Promise<void>;
   repairSeasonPlacement: (selectedFolderPaths: string[]) => Promise<RepairShowResult[]>;
