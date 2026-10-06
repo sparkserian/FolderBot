@@ -1,23 +1,20 @@
 # FolderBot
 
-FolderBot is a cross-platform Electron desktop app for renaming and organizing TV episodes and movies.
+FolderBot names and files TV episodes and movies on Windows, by hand or automatically.
 
-## Current Features
+- **Activity**: watches one inbox folder. When a download finishes and stops changing, FolderBot
+  renames it, copies it to the mirror library and moves it into the source library. Every file
+  shows what is happening and why: still arriving, settling, in use by another program, ready,
+  copying (bytes, speed, time left, step), filed, failed (with the reason and what to do), or
+  skipped. Failed files can be retried; busy-file and network problems retry on their own.
+- **Rename**: drop a batch of files, check the new names side by side, rename. Names come from
+  the filename alone (offline), TheTVDB or TMDb; online lookups ask once per show.
+- **History**: one timeline of everything renamed or filed, with undo and a fix for a wrong show.
+- **Settings**: folders, metadata keys, notifications, start at sign-in, updates, season-folder
+  repair, the watcher log.
 
-- Manual batch rename with a side-by-side preview before anything is written
-- Metadata sources: `Local parser`, `TMDb`, and `TheTVDB`
-- Series confirmation grouped by show, so a whole season is one answer
-- Manual rename history with undo for full batches or selected items
-- Automation watcher for both TV episodes and movies
-- Separate automation destinations for:
-  - TV source library
-  - TV mirror library
-  - movie source library
-  - movie mirror library
-- Launch at login support for installed builds
-- Automation history with undo and a per-item show fix
-- Existing-show season repair for one or more selected folders
-- Tabbed settings and history, and a tray icon that renders on Windows
+FolderBot keeps running in the tray while the watcher is on, notifies when files are filed or
+fail, and updates itself from GitHub Releases.
 
 ## Media Behavior
 
@@ -72,144 +69,62 @@ The movie parser currently preserves:
 - codec tags such as `x264`, `x265`
 - resolution such as `1080p`, `2160p`
 
-## Automation Flow
+## How the watcher files a file
 
-FolderBot watches one inbox folder for settled downloads.
+1. A new file in the inbox is watched until its size and date stop changing for the settle time
+   (45 seconds by default). A matching `.part`, `.crdownload`, `.!qb` or similar file means the
+   download is still running.
+2. FolderBot checks it can open the file. If another program holds it, the file shows as "In use"
+   until it is released.
+3. Files are filed one at a time, oldest first. FolderBot checks there is room on both library
+   drives, then copies to the mirror library and moves into the source library. Copies stream in
+   8 MB chunks to a `.folderbot-partial` file that is renamed into place only when complete.
+4. The result is recorded in History, where it can be undone. An undone file goes back to the
+   inbox and is left alone until it changes.
 
-### TV automation
+Only files directly in the inbox are filed. Videos inside a folder in the inbox are reported on
+the Activity page so they are not silently ignored.
 
-- renames the episode
-- copies it to the configured TV mirror library
-- moves it to the configured TV source library
-- creates show and season folders as needed
+## Install, update, uninstall
 
-### Movie automation
+- **Install**: run `FolderBot-Setup-<version>.exe`. It installs for the current user only, needs
+  no admin rights, adds Start menu and desktop shortcuts, and opens FolderBot. The installer is
+  not code-signed, so Windows SmartScreen asks for confirmation the first time.
+- **Updates**: FolderBot checks GitHub Releases 15 seconds after starting and every 4 hours,
+  downloads a new version in the background and shows "Restart to update". If ignored, the
+  update installs the next time FolderBot quits.
+- **Uninstall**: Settings › Apps › FolderBot › Uninstall. It asks whether to delete settings and
+  history (kept by default). Updates never delete them.
+- **Moving from 1.x**: the 2.x installer removes a 1.x install itself rather than running its old
+  uninstaller (which failed on 1.0.21 and earlier). Settings and history in
+  `%APPDATA%\FolderBot` are kept. `scripts/windows-repair-install.ps1` remains for a stuck 1.x
+  install, but should no longer be needed.
 
-- renames the movie
-- copies it to the configured movie mirror library
-- moves it to the configured movie source library
-- places movies directly in the movie root with no per-movie subfolder
-
-Notes:
-
-- automated movies currently use the local parser path
-- automation repair is for TV episode history items only
-
-## Run Locally
+## Development
 
 ```bash
 npm install
+node node_modules/electron/install.js   # npm 11 skips Electron's download script
 npm run dev
 ```
 
-## Development Scripts
+Checks (all run by `npm run check`):
 
-Check filename parsing against the regression cases in `scripts/check-parser.mjs`:
+- `npm run check:parser`: filename parsing regression cases
+- `npm run check:storage`: settings and history files survive interrupted writes
+- `npm run check:watcher`: drives the real watcher against a temporary inbox (arriving,
+  settling, partial downloads, copy progress on a 1.5 GB file, failures, skips)
+- `npm run check:ui`: loads the built interface in headless Chrome with a stub bridge
 
-```bash
-npm run check:parser
-```
+`npm run preview:ui -- <outDir>` saves screenshots of every page in light and dark with sample
+data (`scripts/ui-stub.js`), for design review without Windows.
 
-Regenerate the app, installer, and tray icons from `build/icon-glyph.svg`. This needs a local
-Chrome, Chromium, or Edge to rasterize, and writes `build/icon.png`, `build/icon.ico`, and
-`src/main/tray-icon.ts`:
-
-```bash
-npm run icons
-```
-
-## Build
-
-App build:
+## Build and release
 
 ```bash
-npm run build
+npm run package    # release/FolderBot-Setup-<version>.exe, built on macOS or Windows
+npm run release    # checks, builds and publishes to GitHub Releases (needs GH_TOKEN)
 ```
 
-Package desktop binaries:
-
-```bash
-npm run package
-```
-
-Platform-specific packaging examples:
-
-```bash
-npx electron-builder --win --x64
-npx electron-builder --mac --arm64
-```
-
-## Windows Notes
-
-- The installable build uses NSIS and should uninstall through Windows `Add or Remove Programs`
-- The portable `.exe` does not have an uninstall flow; it is removed manually
-- Installing a newer build over an older one keeps settings and history. Both live in the
-  Electron user data folder, which is keyed to the app ID and product name, and neither changes
-  between releases
-
-### Upgrading from 1.0.21 or earlier
-
-Those builds shipped an uninstaller whose custom hook ran `nsExec::ExecToLog` without popping
-the return value off the NSIS stack. With FolderBot not running, `taskkill` exits with `128`
-instead of `0`, and the uninstaller exits non-zero.
-
-A new installer runs the old uninstaller to remove the previous version. When that keeps
-failing it reports `FolderBot cannot be closed. Please close it manually and then click Retry`,
-then `Failed to uninstall all the application files`. The wording names the wrong cause: any
-non-zero exit produces it, whether or not the app is running.
-
-The broken uninstaller is the one already on disk, so no new installer can repair it. Clear
-the old install once:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts\windows-repair-install.ps1
-```
-
-Add `-WhatIfOnly` to see what it would remove without changing anything. It never touches
-`%APPDATA%\FolderBot`, so credentials and history survive. Upgrades from 1.0.22 onward do not
-need this.
-- The window draws its own title bar and uses the Windows overlay for the system buttons, so
-  there is no native menu strip
-
-## GitHub Release Flow
-
-This repo uses a local GitHub publishing flow driven by `.env.local`.
-
-1. Copy `.env.example` to `.env.local`
-2. Fill in:
-
-```env
-GH_RELEASE_OWNER=
-GH_RELEASE_REPO=
-GH_TOKEN=
-```
-
-3. Initialize the GitHub repo and local remote:
-
-```bash
-npm run github:repo:init
-```
-
-4. Commit and push your changes:
-
-```bash
-git add .
-git commit -m "Your commit message"
-git push -u origin main
-```
-
-5. Build the version you want to publish
-6. Upload the current version's local artifacts from `release/`:
-
-```bash
-npm run github:release
-```
-
-`github:release` uses the version from `package.json`, creates or updates the GitHub release tag `v<version>`, and uploads matching local artifacts from `release/`.
-
-## Notes
-
-- `.env.local` is ignored by git and should not be committed
-- `GH_TOKEN` should have repo access
-- `github:release` uploads artifacts for the current package version only
-- bump the app version before building a new release
+Bump `version` in `package.json` before a release; installed copies update to it automatically.
+Design notes are in `PRODUCT.md` and `DESIGN.md`; the 2.0 rebuild plan is `docs/plan.md`.

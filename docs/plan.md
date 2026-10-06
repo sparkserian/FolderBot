@@ -34,6 +34,6 @@ rename service, and the history stores. They have check scripts and work.
   name, publish config for updates, removes an old 1.x install without
   running its uninstaller, uninstall removes login entries and asks whether
   to keep settings and history.
-- [ ] 5. Verify and package. Check scripts updated, screenshots of every
+- [x] 5. Verify and package. Check scripts updated, screenshots of every
   screen in light and dark, a large-file copy test on this Mac, Windows
   installer built.
