@@ -134,7 +134,9 @@ const DEFAULT_SETTINGS: AppSettings = {
   automationMovieSourceDirectory: "",
   automationMovieMirrorDirectory: "",
   automationSourceId: "tvdb",
-  automationSettleSeconds: 45
+  automationSettleSeconds: 45,
+  notifyOnFiled: true,
+  notifyOnFailure: true
 };
 
 const DEFAULT_AUTOMATION_STATUS: AutomationStatus = {
@@ -149,7 +151,9 @@ const DEFAULT_AUTOMATION_STATUS: AutomationStatus = {
   sourceId: "tvdb",
   settleSeconds: 45,
   pendingCount: 0,
-  recentEvents: []
+  recentEvents: [],
+  jobs: [],
+  problems: []
 };
 
 const state: AppState = {

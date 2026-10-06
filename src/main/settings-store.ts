@@ -17,7 +17,9 @@ const DEFAULT_SETTINGS: AppSettings = {
   automationMovieSourceDirectory: "",
   automationMovieMirrorDirectory: "",
   automationSourceId: "tvdb",
-  automationSettleSeconds: 45
+  automationSettleSeconds: 45,
+  notifyOnFiled: true,
+  notifyOnFailure: true
 };
 
 // Load the saved settings file and fill in any missing fields with defaults.
@@ -50,7 +52,9 @@ export async function getSettings(): Promise<AppSettings> {
     automationMovieMirrorDirectory:
       parsed.automationMovieMirrorDirectory ?? DEFAULT_SETTINGS.automationMovieMirrorDirectory,
     automationSourceId: normalizeAutomationSourceId(parsed.automationSourceId),
-    automationSettleSeconds: normalizeAutomationSettleSeconds(parsed.automationSettleSeconds)
+    automationSettleSeconds: normalizeAutomationSettleSeconds(parsed.automationSettleSeconds),
+    notifyOnFiled: parsed.notifyOnFiled ?? DEFAULT_SETTINGS.notifyOnFiled,
+    notifyOnFailure: parsed.notifyOnFailure ?? DEFAULT_SETTINGS.notifyOnFailure
   };
 }
 
@@ -71,27 +75,41 @@ function getSettingsPath(): string {
   return path.join(app.getPath("userData"), "settings.json");
 }
 
-// Trim, clamp, and sanitize input values before they are written to disk.
+// Trim, clamp, and sanitize input values before they are written to disk. Only fields present in
+// the input are returned, so saving one setting never resets the others to their defaults.
 function normalizeSettings(input: Partial<AppSettings>): Partial<AppSettings> {
-  return {
-    tmdbBearerToken: input.tmdbBearerToken?.trim(),
-    tvdbApiKey: input.tvdbApiKey?.trim(),
-    tvdbPin: input.tvdbPin?.trim(),
-    defaultLanguage: input.defaultLanguage?.trim() || DEFAULT_SETTINGS.defaultLanguage,
-    launchAtLogin: input.launchAtLogin ?? DEFAULT_SETTINGS.launchAtLogin,
-    automationEnabled: input.automationEnabled ?? DEFAULT_SETTINGS.automationEnabled,
-    automationInboxDirectory: input.automationInboxDirectory?.trim() ?? DEFAULT_SETTINGS.automationInboxDirectory,
-    automationSourceLibraryDirectory:
-      input.automationSourceLibraryDirectory?.trim() ?? DEFAULT_SETTINGS.automationSourceLibraryDirectory,
-    automationMirrorLibraryDirectory:
-      input.automationMirrorLibraryDirectory?.trim() ?? DEFAULT_SETTINGS.automationMirrorLibraryDirectory,
-    automationMovieSourceDirectory:
-      input.automationMovieSourceDirectory?.trim() ?? DEFAULT_SETTINGS.automationMovieSourceDirectory,
-    automationMovieMirrorDirectory:
-      input.automationMovieMirrorDirectory?.trim() ?? DEFAULT_SETTINGS.automationMovieMirrorDirectory,
-    automationSourceId: normalizeAutomationSourceId(input.automationSourceId),
-    automationSettleSeconds: normalizeAutomationSettleSeconds(input.automationSettleSeconds)
+  const output: Partial<AppSettings> = {};
+  const text = (value: string | undefined) => (value === undefined ? undefined : value.trim());
+
+  const assign = <K extends keyof AppSettings>(key: K, value: AppSettings[K] | undefined) => {
+    if (value !== undefined) {
+      output[key] = value;
+    }
   };
+
+  assign("tmdbBearerToken", text(input.tmdbBearerToken));
+  assign("tvdbApiKey", text(input.tvdbApiKey));
+  assign("tvdbPin", text(input.tvdbPin));
+  if (input.defaultLanguage !== undefined) {
+    assign("defaultLanguage", input.defaultLanguage.trim() || DEFAULT_SETTINGS.defaultLanguage);
+  }
+  assign("launchAtLogin", input.launchAtLogin);
+  assign("automationEnabled", input.automationEnabled);
+  assign("automationInboxDirectory", text(input.automationInboxDirectory));
+  assign("automationSourceLibraryDirectory", text(input.automationSourceLibraryDirectory));
+  assign("automationMirrorLibraryDirectory", text(input.automationMirrorLibraryDirectory));
+  assign("automationMovieSourceDirectory", text(input.automationMovieSourceDirectory));
+  assign("automationMovieMirrorDirectory", text(input.automationMovieMirrorDirectory));
+  if (input.automationSourceId !== undefined) {
+    assign("automationSourceId", normalizeAutomationSourceId(input.automationSourceId));
+  }
+  if (input.automationSettleSeconds !== undefined) {
+    assign("automationSettleSeconds", normalizeAutomationSettleSeconds(input.automationSettleSeconds));
+  }
+  assign("notifyOnFiled", input.notifyOnFiled);
+  assign("notifyOnFailure", input.notifyOnFailure);
+
+  return output;
 }
 
 // Accept only provider IDs the rest of the app knows how to handle.

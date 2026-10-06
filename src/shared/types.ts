@@ -110,12 +110,91 @@ export interface AppSettings {
   automationMovieMirrorDirectory: string;
   automationSourceId: MetadataSourceId;
   automationSettleSeconds: number;
+  notifyOnFiled: boolean;
+  notifyOnFailure: boolean;
 }
 
 // One log entry in the live automation status panel.
 export interface AutomationEvent {
   createdAt: string;
   message: string;
+  level?: "info" | "success" | "warning" | "error";
+  jobId?: string;
+}
+
+// Where one inbox file is in the watcher's pipeline.
+//   arriving  the file is still growing (a download or copy is writing it)
+//   settling  the size has stopped changing; waiting out the settle time
+//   locked    another program, or Windows, will not let FolderBot open it yet
+//   queued    ready, waiting for the file ahead of it to finish
+//   matching  reading the name and looking it up
+//   copying   copying to the mirror library
+//   moving    moving into the source library
+//   filed     done
+//   failed    stopped with an error; retry or skip
+//   skipped   left alone by the user until the file changes
+export type AutomationJobStage =
+  | "arriving"
+  | "settling"
+  | "locked"
+  | "queued"
+  | "matching"
+  | "copying"
+  | "moving"
+  | "filed"
+  | "failed"
+  | "skipped";
+
+export interface AutomationJobProgress {
+  // Which transfer is running, and how many there are for this file.
+  step: "mirror" | "source";
+  stepIndex: number;
+  stepCount: number;
+  bytesDone: number;
+  bytesTotal: number;
+  bytesPerSecond: number;
+  etaSeconds: number | null;
+}
+
+export interface AutomationJobError {
+  message: string;
+  hint?: string;
+  code?: string;
+  at: string;
+  // Transient problems (a busy file, a dropped network) are retried on their own.
+  willRetryAt?: string;
+}
+
+export interface AutomationJob {
+  id: string;
+  fileName: string;
+  inboxPath: string;
+  size: number;
+  stage: AutomationJobStage;
+  // One plain sentence: what is happening right now, or why it is waiting.
+  detail: string;
+  mediaKind?: MediaKind;
+  title?: string;
+  targetName?: string;
+  firstSeenAt: string;
+  stageSince: string;
+  // While arriving: how fast the file is growing. While settling: when it will be picked up.
+  growthBytesPerSecond?: number;
+  readyAt?: string;
+  progress?: AutomationJobProgress;
+  error?: AutomationJobError;
+  attempts: number;
+  finishedAt?: string;
+  sourceLibraryPath?: string;
+  mirrorLibraryPath?: string;
+  historyEntryId?: string;
+}
+
+// A problem with the watcher itself rather than one file: a missing inbox, an unplugged drive.
+export interface AutomationProblem {
+  message: string;
+  hint?: string;
+  path?: string;
 }
 
 // Snapshot of the automation watcher's state for the renderer.
@@ -132,6 +211,29 @@ export interface AutomationStatus {
   settleSeconds: number;
   pendingCount: number;
   recentEvents: AutomationEvent[];
+  // Every file the watcher knows about: active ones first, then recently finished.
+  jobs: AutomationJob[];
+  problems: AutomationProblem[];
+  lastScanAt?: string;
+  logPath?: string;
+}
+
+// The self-updater's state, shown in Settings and as a banner when an update is ready.
+export type UpdateState =
+  | { kind: "idle"; checkedAt?: string }
+  | { kind: "unsupported"; reason: string }
+  | { kind: "checking" }
+  | { kind: "available"; version: string }
+  | { kind: "downloading"; version: string; percent: number; bytesPerSecond: number }
+  | { kind: "ready"; version: string }
+  | { kind: "error"; message: string; checkedAt?: string };
+
+export interface AppInfo {
+  version: string;
+  platform: string;
+  userDataPath: string;
+  logPath: string;
+  packaged: boolean;
 }
 
 // Persistent record of one completed automation item.

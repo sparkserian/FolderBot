@@ -15,11 +15,12 @@
     "check:parser": "npm run build:electron && node scripts/check-parser.mjs",
     "check:storage": "npm run build:electron && node scripts/check-storage.mjs",
     "check:ui": "npm run build:renderer && node scripts/check-ui.mjs",
-    "check": "npm run typecheck && npm run check:parser && npm run check:storage && npm run check:ui",
+    "check": "npm run typecheck && npm run check:parser && npm run check:storage && npm run check:watcher && npm run check:ui",
     "icons": "node scripts/generate-icons.mjs",
     "package": "npm run build && electron-builder",
     "github:repo:init": "node scripts/github-init-repo.mjs",
-    "github:release": "node scripts/github-publish-release.mjs"
+    "github:release": "node scripts/github-publish-release.mjs",
+    "check:watcher": "npm run build:electron && node scripts/check-watcher.cjs"
   },
   "keywords": [
     "electron",
@@ -83,6 +84,9 @@
   },
   "devDependencies": {
     "@types/node": "^24.5.2",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^5.2.0",
     "concurrently": "^9.2.1",
     "cross-env": "^10.0.0",
     "electron": "^38.1.0",
@@ -91,5 +95,10 @@
     "typescript": "^5.9.2",
     "vite": "^7.1.5",
     "wait-on": "^8.0.5"
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.9",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0"
   }
 }
