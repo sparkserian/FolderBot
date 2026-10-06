@@ -1,7 +1,7 @@
 {
   "name": "folderbot",
-  "version": "1.0.24",
-  "description": "Cross-platform Electron media renamer inspired by FileBot workflows",
+  "version": "2.0.0",
+  "description": "Names and files TV episodes and movies, by hand or automatically from a watched folder",
   "main": "dist-electron/main/main.js",
   "scripts": {
     "dev": "concurrently -k -n renderer,electron-ts,electron-app \"npm:dev:renderer\" \"npm:dev:electron:ts\" \"npm:dev:electron:app\"",
@@ -17,10 +17,12 @@
     "check:ui": "npm run build:renderer && node scripts/check-ui.mjs",
     "check": "npm run typecheck && npm run check:parser && npm run check:storage && npm run check:watcher && npm run check:ui",
     "icons": "node scripts/generate-icons.mjs",
-    "package": "npm run build && electron-builder",
+    "package": "npm run build && electron-builder --win --x64 --publish never",
     "github:repo:init": "node scripts/github-init-repo.mjs",
     "github:release": "node scripts/github-publish-release.mjs",
-    "check:watcher": "npm run build:electron && node scripts/check-watcher.cjs"
+    "check:watcher": "npm run build:electron && node scripts/check-watcher.cjs",
+    "release": "npm run check && npm run build && electron-builder --win --x64 --publish always",
+    "preview:ui": "npm run build:renderer && node scripts/ui-preview.mjs"
   },
   "keywords": [
     "electron",
@@ -44,7 +46,10 @@
     ],
     "mac": {
       "category": "public.app-category.utilities",
-      "icon": "build/icon.png"
+      "icon": "build/icon.png",
+      "target": [
+        "dir"
+      ]
     },
     "win": {
       "icon": "build/icon.ico",
@@ -54,23 +59,22 @@
           "arch": [
             "x64"
           ]
-        },
-        {
-          "target": "portable",
-          "arch": [
-            "x64"
-          ]
         }
-      ]
+      ],
+      "artifactName": "FolderBot-Setup-${version}.${ext}"
     },
     "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "allowElevation": false,
+      "createDesktopShortcut": "always",
+      "createStartMenuShortcut": true,
+      "shortcutName": "FolderBot",
+      "runAfterFinish": true,
+      "deleteAppDataOnUninstall": false,
       "installerIcon": "build/icon.ico",
       "uninstallerIcon": "build/icon.ico",
-      "installerHeaderIcon": "build/icon.ico",
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
-      "perMachine": false,
-      "removeDefaultUninstallWelcomePage": true,
+      "uninstallDisplayName": "FolderBot",
       "include": "build/installer.nsh"
     },
     "linux": {
@@ -80,9 +84,18 @@
         "deb"
       ],
       "category": "Utility"
-    }
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "sparkserian",
+        "repo": "FolderBot",
+        "releaseType": "release"
+      }
+    ]
   },
   "devDependencies": {
+    "@phosphor-icons/react": "^2.1.10",
     "@types/node": "^24.5.2",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
@@ -92,14 +105,13 @@
     "electron": "^38.1.0",
     "electron-builder": "^26.0.12",
     "nodemon": "^3.1.10",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
     "typescript": "^5.9.2",
     "vite": "^7.1.5",
     "wait-on": "^8.0.5"
   },
   "dependencies": {
-    "@phosphor-icons/react": "^2.1.10",
-    "electron-updater": "^6.8.9",
-    "react": "^19.3.0",
-    "react-dom": "^19.3.0"
+    "electron-updater": "^6.8.9"
   }
 }
